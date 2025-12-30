@@ -55,9 +55,11 @@ export default function POSPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const categories = useMemo(() => {
-    const set = new Set(products.filter(p => p.active).map((p) => p.category || "general"));
+    const list = Array.isArray(products) ? products : [];
+    const set = new Set(list.filter(p => p.active).map(p => p.category || "general"));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [products]);
+
 
   const filtered = useMemo(
     () => products.filter((p) => (p.category || "general") === category),
@@ -72,13 +74,29 @@ export default function POSPage() {
   // Cargar productos
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/products");
-      const data = await res.json();
-      const items: Product[] = (data.items ?? []).filter((p: Product) => p.active);
-      setProducts(items);
+      try {
+        const res = await fetch("/api/products", { cache: "no-store" });
 
-      if (items.length > 0) {
-        setCategory(items[0].category || "general");
+        // Si no es 2xx, evita reventar el JSON
+        if (!res.ok) {
+          console.error("GET /api/products failed:", res.status);
+          setProducts([]); // deja vacío
+          return;
+        }
+
+        const data = await res.json();
+
+        // ✅ Asegura que items sea array
+        const raw = Array.isArray(data?.items) ? data.items : [];
+        const items: Product[] = raw.filter((p: any) => p?.active);
+
+        setProducts(items);
+
+        if (items.length > 0) setCategory(items[0].category || "general");
+        else setCategory("general");
+      } catch (e) {
+        console.error("GET /api/products crash:", e);
+        setProducts([]);
       }
     })();
   }, []);
@@ -132,9 +150,8 @@ export default function POSPage() {
             <button
               key={c}
               onClick={() => setCategory(c)}
-              className={`w-full rounded-xl px-3 py-2 text-sm ${
-                c === category ? "bg-green-500 text-black" : "bg-neutral-800 text-white"
-              }`}
+              className={`w-full rounded-xl px-3 py-2 text-sm ${c === category ? "bg-green-500 text-black" : "bg-neutral-800 text-white"
+                }`}
             >
               {c}
             </button>
