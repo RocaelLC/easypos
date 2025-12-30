@@ -19,17 +19,25 @@ export default function CheckoutModal({
     new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
 
   async function pay() {
-    setLoading(true);
-    await submitSale({
-      items: cart,
-      total,
-      paymentMethod: method,
-      createdAt: new Date().toISOString(),
-    });
-    setLoading(false);
-    onDone();
-  }
+  setLoading(true);
 
+  const items = cart.map((i) => ({
+  productId: i.productId ?? i.id,
+  qty: i.qty ?? i.quantity ?? 1,
+  price: Number(i.price ?? i.unitPrice ?? i.basePrice ?? 0),
+  name: i.name,
+}));
+
+  await submitSale({
+    items,
+    total,
+    paymentMethod: method,
+    createdAt: new Date().toISOString(),
+  });
+
+  setLoading(false);
+  onDone();
+}
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60">
       <div className="w-full md:max-w-md rounded-t-2xl md:rounded-2xl bg-neutral-950 border border-neutral-800 p-4">

@@ -13,6 +13,8 @@ const nav = [
   { href: "/catalogo/modificadores", label: "Modificadores" },
   { href: "/cartera", label: "Cartera" },
   { href: "/reportes/diario", label: "Reporte diario" },
+    { href: "/compras", label: "Compras" },
+    { href: "/insumos", label: "Insumos" },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
