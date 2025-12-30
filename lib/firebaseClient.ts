@@ -1,5 +1,5 @@
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
+import { getAuth, type Auth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -10,6 +10,42 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
 };
 
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+// --- internals ---
+let _app: FirebaseApp | null = null;
+let _auth: Auth | null = null;
 
-export const auth = getAuth(app);
+export function getFirebaseAppClient(): FirebaseApp {
+  if (typeof window === "undefined") {
+    throw new Error("Firebase client called on server");
+  }
+  if (_app) return _app;
+
+  _app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  return _app;
+}
+
+export function getAuthClient(): Auth {
+  if (typeof window === "undefined") {
+    throw new Error("Auth client called on server");
+  }
+  if (_auth) return _auth;
+
+  const app = getFirebaseAppClient();
+  _auth = getAuth(app);
+  return _auth;
+}
+
+/**
+ * ✅ Compatibilidad: muchos archivos hacen `import { auth } from "@/lib/firebaseClient"`
+ * Este proxy evita que truene en build/SSR, pero SOLO funciona en cliente.
+ */
+export const auth = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const a = getAuthClient();
+      // @ts-ignore
+      return a[prop];
+    },
+  }
+) as Auth;
