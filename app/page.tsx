@@ -227,7 +227,7 @@ function LineItem({ name, meta, price }: { name: string; meta: string; price: st
 
 function Feature({ title, desc }: { title: string; desc: string }) {
   return (
-    <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5">
+    <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6">
       <div className="text-sm font-semibold">{title}</div>
       <div className="mt-2 text-sm text-neutral-300">{desc}</div>
     </div>
