@@ -1,10 +1,11 @@
-
 "use client";
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import CustomizeProductModal from "@/components/CustomizeProductModal";
 import CheckoutModal from "@/components/CheckoutModal";
+import { useAuth } from "@/lib/useAuth";
+import { useRouter } from "next/navigation";
 
 type Product = {
   _id: string;
@@ -43,18 +44,32 @@ function itemUnitTotal(item: CartItem) {
 }
 
 export default function POSPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const categories = useMemo(() => {
-    const set = new Set(products.filter(p => p.active).map((p) => p.category || "general"));
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [products]);
+  const router = useRouter();
+  const { user, loading } = useAuth();
 
+  // ✅ TODOS los hooks arriba (sin returns antes)
+  const [products, setProducts] = useState<Product[]>([]);
   const [category, setCategory] = useState<string>("general");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customizing, setCustomizing] = useState<Product | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
-  // cargar productos desde API
+  const categories = useMemo(() => {
+    const set = new Set(products.filter(p => p.active).map((p) => p.category || "general"));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const filtered = useMemo(
+    () => products.filter((p) => (p.category || "general") === category),
+    [products, category]
+  );
+
+  // Guard: si no hay user cuando termina loading -> login
+  useEffect(() => {
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
+
+  // Cargar productos
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/products");
@@ -62,18 +77,22 @@ export default function POSPage() {
       const items: Product[] = (data.items ?? []).filter((p: Product) => p.active);
       setProducts(items);
 
-      // setea categoría inicial
       if (items.length > 0) {
-        const firstCat = (items[0].category || "general");
-        setCategory(firstCat);
+        setCategory(items[0].category || "general");
       }
     })();
   }, []);
 
-  const filtered = useMemo(
-    () => products.filter((p) => (p.category || "general") === category),
-    [products, category]
-  );
+  // ✅ Ahora sí: returns al final de hooks
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center">
+        Cargando sesión...
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   function onProductClick(p: Product) {
     if (p.modifierGroupIds && p.modifierGroupIds.length > 0) setCustomizing(p);
@@ -108,7 +127,6 @@ export default function POSPage() {
   return (
     <>
       <div className="grid grid-cols-12 gap-4">
-        {/* Categorías */}
         <aside className="col-span-12 md:col-span-2 space-y-2">
           {categories.map((c) => (
             <button
@@ -126,7 +144,6 @@ export default function POSPage() {
           )}
         </aside>
 
-        {/* Productos */}
         <section className="col-span-12 md:col-span-7 grid grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map((p) => (
             <button
@@ -145,7 +162,6 @@ export default function POSPage() {
           ))}
         </section>
 
-        {/* Carrito */}
         <aside className="col-span-12 md:col-span-3 border-l border-neutral-800 md:pl-3">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Carrito</h2>
@@ -170,12 +186,15 @@ export default function POSPage() {
                         <div className="mt-1 text-xs text-neutral-400 space-y-1">
                           {item.selections.map((s) => (
                             <div key={`${item.id}-${s.groupId}-${s.optionId}`}>
-                              • {s.groupName}: {s.optionName} {s.price ? `(+${money(s.price)})` : ""}
+                              • {s.groupName}: {s.optionName}{" "}
+                              {s.price ? `(+${money(s.price)})` : ""}
                             </div>
                           ))}
                         </div>
                       )}
-                      {item.note && <div className="mt-1 text-xs text-neutral-500">Nota: {item.note}</div>}
+                      {item.note && (
+                        <div className="mt-1 text-xs text-neutral-500">Nota: {item.note}</div>
+                      )}
                     </div>
 
                     <button
