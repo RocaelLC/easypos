@@ -5,29 +5,22 @@ import { useEffect, useMemo, useState } from "react";
 import { getStorageClient } from "@/lib/firebaseClient";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-type Ingredient = {
-  _id: string;
-  name: string;
-  unit: "g" | "ml" | "pz";
-  stock: number;
-  minStock: number;
-  avgCost: number;
-};
+type Ingredient = { _id: string; name: string; unit: "g" | "ml" | "pz"; stock: number; minStock: number; avgCost: number };
 
 type ModifierOption = {
-  id: string;               // "oreo"
-  name: string;             // "Oreo"
-  price: number;            // +10
-  imageUrl?: string;        // ✅ NUEVO
-  ingredientId?: string;    // "oreo"
-  qty?: number;             // 20 (g/ml/pz)
+  id: string;
+  name: string;
+  price: number;
+  imageUrl?: string;        // ✅ opcional
+  ingredientId?: string;
+  qty?: number;
 };
 
 type ModifierGroup = {
-  _id: string;              // "toppings"
-  name: string;             // "Toppings"
-  min: number;              // 0
-  max: number;              // 3 (0 = sin límite)
+  _id: string;
+  name: string;
+  min: number;
+  max: number; // 0 = sin límite
   required: boolean;
   options: ModifierOption[];
 };
@@ -53,7 +46,7 @@ export default function ModificadoresPage() {
   const [optQty, setOptQty] = useState<number>(0);
   const [options, setOptions] = useState<ModifierOption[]>([]);
 
-  // Imagen opción
+  // Imagen opción (opcional)
   const [optFile, setOptFile] = useState<File | null>(null);
   const [optPreview, setOptPreview] = useState<string>("");
   const [uploadingOpt, setUploadingOpt] = useState(false);
@@ -83,64 +76,79 @@ export default function ModificadoresPage() {
     [ingredients, optIng]
   );
 
- async function uploadModifierOptionImage(file: File, groupId: string, optionId: string) {
-  const safeGroup = normalizeId(groupId || "grupo");
-  const safeOpt = normalizeId(optionId || "opcion");
-  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-  const path = `modifier-options/${safeGroup}/${safeOpt}.${ext}`;
+  // ✅ Upload "best-effort": si falla, regresamos undefined y NO bloquea
+  async function tryUploadModifierOptionImage(file: File, groupId: string, optionId: string): Promise<string | undefined> {
+    try {
+      const safeGroup = normalizeId(groupId || "grupo");
+      const safeOpt = normalizeId(optionId || "opcion");
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `modifier-options/${safeGroup}/${safeOpt}.${ext}`;
 
-  const storage = getStorageClient(); // ✅ instancia real
-  const r = ref(storage, path);
+      const storage = getStorageClient(); // puede fallar si Storage no está habilitado
+      const r = ref(storage, path);
 
-  await uploadBytes(r, file, { contentType: file.type || "image/jpeg" });
-  return await getDownloadURL(r);
-}
+      await uploadBytes(r, file, { contentType: file.type || "image/jpeg" });
+      return await getDownloadURL(r);
+    } catch (e) {
+      console.warn("[modifier image] upload skipped:", e);
+      return undefined; // ✅ seguimos sin imagen
+    }
+  }
 
   async function addOption() {
     setMsg("");
-    const gidNorm = normalizeId(gid);
-    if (!gidNorm) return setMsg("❌ Primero define el ID del grupo (ej: toppings).");
-
     const oid = normalizeId(optId);
     if (!oid) return setMsg("❌ ID de opción obligatorio (ej: oreo).");
     if (!optName.trim()) return setMsg("❌ Nombre de opción obligatorio.");
     if (options.some(o => o.id === oid)) return setMsg("❌ Ese ID de opción ya existe en el grupo.");
-    if (!optFile) return setMsg("❌ Sube una imagen para esta opción.");
 
-    // Validación básica de archivo
-    if (!optFile.type.startsWith("image/")) return setMsg("❌ El archivo debe ser una imagen.");
-    const maxMB = 3;
-    if (optFile.size > maxMB * 1024 * 1024) return setMsg(`❌ La imagen debe pesar menos de ${maxMB}MB.`);
+    // Validación de insumo/cantidad
+    const ingredientId = optIng ? String(optIng) : undefined;
+    const qty = ingredientId ? Number(optQty ?? 0) : undefined;
 
-    setUploadingOpt(true);
-    try {
-      const imageUrl = await uploadModifierOptionImage(optFile, gidNorm, oid);
+    // ✅ imagen opcional: si existe, intentamos subir; si falla, no pasa nada
+    let imageUrl: string | undefined = undefined;
 
-      const opt: ModifierOption = {
-        id: oid,
-        name: optName.trim(),
-        price: Number(optPrice ?? 0),
-        imageUrl,
-        ingredientId: optIng ? String(optIng) : undefined,
-        qty: optIng ? Number(optQty ?? 0) : undefined,
-      };
+    if (optFile) {
+      if (!optFile.type.startsWith("image/")) {
+        return setMsg("❌ El archivo debe ser una imagen.");
+      }
+      const maxMB = 3;
+      if (optFile.size > maxMB * 1024 * 1024) {
+        return setMsg(`❌ La imagen debe pesar menos de ${maxMB}MB.`);
+      }
 
-      setOptions(prev => [...prev, opt]);
-
-      // reset
-      setOptId("");
-      setOptName("");
-      setOptPrice(0);
-      setOptIng("");
-      setOptQty(0);
-      setOptFile(null);
-
-      setMsg("✅ Opción agregada con imagen.");
-    } catch (e: any) {
-      setMsg("❌ No se pudo subir imagen: " + (e?.message ?? "error"));
-    } finally {
+      setUploadingOpt(true);
+      imageUrl = await tryUploadModifierOptionImage(optFile, gid || "grupo", oid);
       setUploadingOpt(false);
+
+      if (!imageUrl) {
+        // ✅ informativo, pero no bloquea
+        setMsg("⚠️ Imagen no subida (Storage no habilitado). La opción se guardará sin imagen.");
+      }
     }
+
+    const opt: ModifierOption = {
+      id: oid,
+      name: optName.trim(),
+      price: Number(optPrice ?? 0),
+      imageUrl, // puede ser undefined
+      ingredientId,
+      qty,
+    };
+
+    setOptions(prev => [...prev, opt]);
+
+    // reset opción
+    setOptId("");
+    setOptName("");
+    setOptPrice(0);
+    setOptIng("");
+    setOptQty(0);
+    setOptFile(null);
+
+    // si no hay mensaje de warning previo
+    setMsg((prev) => prev.startsWith("⚠️") ? prev : "✅ Opción agregada.");
   }
 
   function removeOption(id: string) {
@@ -156,10 +164,6 @@ export default function ModificadoresPage() {
     if (gmax < 0) return setMsg("❌ max inválido.");
     if (gmax !== 0 && gmax < gmin) return setMsg("❌ max no puede ser menor que min.");
 
-    // ✅ asegurar que todas las opciones tengan imagen
-    const missingImg = options.find(o => !o.imageUrl);
-    if (missingImg) return setMsg(`❌ La opción "${missingImg.name}" no tiene imagen.`);
-
     setLoading(true);
     try {
       const res = await fetch("/api/modifier-groups", {
@@ -171,7 +175,7 @@ export default function ModificadoresPage() {
           min: Number(gmin),
           max: Number(gmax),
           required: Boolean(grequired),
-          options,
+          options, // imageUrl puede venir o no
         }),
       });
       const data = await res.json().catch(() => null);
@@ -209,23 +213,18 @@ export default function ModificadoresPage() {
       <div>
         <h1 className="text-2xl font-semibold">Modificadores</h1>
         <p className="text-sm text-neutral-400">
-          Crea grupos (Tamaño, Toppings, Leche...) y sus opciones. Ahora cada opción puede tener imagen.
+          Crea grupos (Tamaño, Toppings, Leche...) y sus opciones. La imagen es opcional (por ahora).
         </p>
       </div>
 
-      {/* Crear grupo */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="font-medium">Nuevo grupo</div>
 
         <div className="grid md:grid-cols-6 gap-2">
           <div className="md:col-span-2">
             <label className="text-xs text-neutral-400">ID grupo</label>
-            <input
-              value={gid}
-              onChange={(e)=>setGid(e.target.value)}
-              placeholder="toppings"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            />
+            <input value={gid} onChange={(e)=>setGid(e.target.value)} placeholder="toppings"
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
             <div className="text-xs text-neutral-500 mt-1">
               Normaliza: <span className="text-neutral-300">{normalizeId(gid || "…")}</span>
             </div>
@@ -233,32 +232,20 @@ export default function ModificadoresPage() {
 
           <div className="md:col-span-2">
             <label className="text-xs text-neutral-400">Nombre</label>
-            <input
-              value={gname}
-              onChange={(e)=>setGname(e.target.value)}
-              placeholder="Toppings"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            />
+            <input value={gname} onChange={(e)=>setGname(e.target.value)} placeholder="Toppings"
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
           </div>
 
           <div>
             <label className="text-xs text-neutral-400">Min</label>
-            <input
-              type="number"
-              value={gmin}
-              onChange={(e)=>setGmin(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            />
+            <input type="number" value={gmin} onChange={(e)=>setGmin(Number(e.target.value))}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
           </div>
 
           <div>
             <label className="text-xs text-neutral-400">Max (0 = sin límite)</label>
-            <input
-              type="number"
-              value={gmax}
-              onChange={(e)=>setGmax(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            />
+            <input type="number" value={gmax} onChange={(e)=>setGmax(Number(e.target.value))}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
           </div>
         </div>
 
@@ -267,75 +254,49 @@ export default function ModificadoresPage() {
           Requerido
         </label>
 
-        {/* Opción */}
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 space-y-2">
-          <div className="text-sm font-medium">Agregar opción (con imagen)</div>
+          <div className="text-sm font-medium">Agregar opción (imagen opcional)</div>
 
           <div className="grid md:grid-cols-6 gap-2">
             <div className="md:col-span-2">
               <label className="text-xs text-neutral-400">ID opción</label>
-              <input
-                value={optId}
-                onChange={(e)=>setOptId(e.target.value)}
-                placeholder="oreo"
-                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
-              />
+              <input value={optId} onChange={(e)=>setOptId(e.target.value)} placeholder="oreo"
+                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2" />
             </div>
 
             <div className="md:col-span-2">
               <label className="text-xs text-neutral-400">Nombre</label>
-              <input
-                value={optName}
-                onChange={(e)=>setOptName(e.target.value)}
-                placeholder="Oreo"
-                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
-              />
+              <input value={optName} onChange={(e)=>setOptName(e.target.value)} placeholder="Oreo"
+                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2" />
             </div>
 
             <div>
               <label className="text-xs text-neutral-400">Precio extra</label>
-              <input
-                type="number"
-                step="0.01"
-                value={optPrice}
-                onChange={(e)=>setOptPrice(Number(e.target.value))}
-                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
-              />
+              <input type="number" step="0.01" value={optPrice} onChange={(e)=>setOptPrice(Number(e.target.value))}
+                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2" />
             </div>
 
             <div>
               <label className="text-xs text-neutral-400">Insumo (opcional)</label>
-              <select
-                value={optIng}
-                onChange={(e)=>setOptIng(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
-              >
+              <select value={optIng} onChange={(e)=>setOptIng(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
                 <option value="">—</option>
-                {ingredients.map(i => (
-                  <option key={i._id} value={i._id}>{i.name} ({i.unit})</option>
-                ))}
+                {ingredients.map(i => <option key={i._id} value={i._id}>{i.name} ({i.unit})</option>)}
               </select>
             </div>
 
             <div>
               <label className="text-xs text-neutral-400">Cantidad del insumo</label>
-              <input
-                type="number"
-                step="0.01"
-                value={optQty}
-                onChange={(e)=>setOptQty(Number(e.target.value))}
+              <input type="number" step="0.01" value={optQty} onChange={(e)=>setOptQty(Number(e.target.value))}
                 disabled={!optIng}
-                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 disabled:opacity-50"
-              />
+                className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 disabled:opacity-50" />
               {optIng && selectedIngredient && (
-                <div className="text-xs text-neutral-500 mt-1">
-                  Unidad: <span className="text-neutral-300">{selectedIngredient.unit}</span>
-                </div>
+                <div className="text-xs text-neutral-500 mt-1">Unidad: <span className="text-neutral-300">{selectedIngredient.unit}</span></div>
               )}
             </div>
 
             <div className="md:col-span-2">
-              <label className="text-xs text-neutral-400">Imagen (obligatoria)</label>
+              <label className="text-xs text-neutral-400">Imagen (opcional)</label>
               <input
                 type="file"
                 accept="image/*"
@@ -345,11 +306,7 @@ export default function ModificadoresPage() {
               {optPreview && (
                 <div className="mt-2 flex items-center gap-3">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={optPreview}
-                    alt="preview"
-                    className="h-12 w-12 rounded-xl object-cover border border-neutral-800"
-                  />
+                  <img src={optPreview} alt="preview" className="h-12 w-12 rounded-xl object-cover border border-neutral-800" />
                   <div className="text-xs text-neutral-400">Preview</div>
                 </div>
               )}
@@ -384,6 +341,7 @@ export default function ModificadoresPage() {
                       </div>
                     </div>
                   </div>
+
                   <button onClick={() => removeOption(o.id)} className="text-sm text-red-300 hover:text-red-200">
                     Quitar
                   </button>
@@ -394,16 +352,17 @@ export default function ModificadoresPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            disabled={loading}
-            onClick={saveGroup}
-            className="rounded-xl bg-green-500 text-black px-4 py-2 font-medium disabled:opacity-50"
-          >
+          <button disabled={loading} onClick={saveGroup}
+            className="rounded-xl bg-green-500 text-black px-4 py-2 font-medium disabled:opacity-50">
             {loading ? "Guardando..." : "Guardar grupo"}
           </button>
 
           {msg && (
-            <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>
+            <div className={`text-sm ${
+              msg.startsWith("✅") ? "text-green-400" :
+              msg.startsWith("⚠️") ? "text-amber-300" :
+              "text-red-400"
+            }`}>
               {msg}
             </div>
           )}
@@ -422,17 +381,12 @@ export default function ModificadoresPage() {
               <div key={g._id} className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-medium">
-                      {g.name} <span className="text-xs text-neutral-500">({g._id})</span>
-                    </div>
+                    <div className="text-sm font-medium">{g.name} <span className="text-xs text-neutral-500">({g._id})</span></div>
                     <div className="text-xs text-neutral-400">
                       min: {g.min} · max: {g.max === 0 ? "∞" : g.max} · requerido: {g.required ? "sí" : "no"} · opciones: {g.options?.length ?? 0}
                     </div>
                   </div>
-                  <button
-                    onClick={() => deleteGroup(g._id)}
-                    className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm"
-                  >
+                  <button onClick={() => deleteGroup(g._id)} className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm">
                     Eliminar
                   </button>
                 </div>
@@ -451,9 +405,7 @@ export default function ModificadoresPage() {
                             </div>
                           )}
                           <div>
-                            <div className="text-sm font-medium">
-                              {o.name} <span className="text-xs text-neutral-500">({o.id})</span>
-                            </div>
+                            <div className="text-sm font-medium">{o.name} <span className="text-xs text-neutral-500">({o.id})</span></div>
                             <div className="text-xs text-neutral-400">
                               +{o.price} {o.ingredientId ? `· Insumo: ${o.ingredientId} (${o.qty ?? 0})` : ""}
                             </div>
