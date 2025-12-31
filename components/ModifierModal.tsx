@@ -6,9 +6,11 @@ type ModifierOption = {
   id: string;
   name: string;
   price: number;
+  imageUrl?: string; // ✅
   ingredientId?: string;
   qty?: number;
 };
+
 
 type ModifierGroup = {
   _id: string;

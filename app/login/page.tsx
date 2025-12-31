@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getAuthClient } from "@/lib/firebaseClient";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -17,6 +17,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    const auth = getAuthClient();
 
     try {
       if (mode === "login") {
@@ -24,7 +25,7 @@ export default function LoginPage() {
       } else {
         await createUserWithEmailAndPassword(auth, email, password);
       }
-      router.push("/pos");
+      router.replace("/dashboard");
     } catch (err: any) {
       setError(err.message);
     } finally {

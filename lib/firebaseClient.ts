@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -13,6 +14,7 @@ const firebaseConfig = {
 // --- internals ---
 let _app: FirebaseApp | null = null;
 let _auth: Auth | null = null;
+let _storage: FirebaseStorage | null = null;
 
 export function getFirebaseAppClient(): FirebaseApp {
   if (typeof window === "undefined") {
@@ -35,6 +37,17 @@ export function getAuthClient(): Auth {
   return _auth;
 }
 
+export function getStorageClient(): FirebaseStorage {
+  if (typeof window === "undefined") {
+    throw new Error("Storage client called on server");
+  }
+  if (_storage) return _storage;
+
+  const app = getFirebaseAppClient();
+  _storage = getStorage(app);
+  return _storage;
+}
+
 /**
  * ✅ Compatibilidad: muchos archivos hacen `import { auth } from "@/lib/firebaseClient"`
  * Este proxy evita que truene en build/SSR, pero SOLO funciona en cliente.
@@ -49,3 +62,17 @@ export const auth = new Proxy(
     },
   }
 ) as Auth;
+
+/**
+ * ✅ Storage proxy (cliente)
+ */
+export const storage = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const s = getStorageClient();
+      // @ts-ignore
+      return s[prop];
+    },
+  }
+) as FirebaseStorage;

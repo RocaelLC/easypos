@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
 import type { Document } from "mongodb";
+
 type ModifierGroupDoc = {
   _id: string;
   name: string;
@@ -27,29 +28,28 @@ export async function POST(req: Request) {
     const { id, name, min = 0, max = 0, required = false, options = [] } = body;
 
     if (!id || !name) {
-      return NextResponse.json(
-        { error: "id and name required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "id and name required" }, { status: 400 });
     }
 
     const safeId = String(id).trim();
 
     const safeOptions = Array.isArray(options)
-      ? options.map((o: any) => ({
-          id: String(o.id ?? "").trim(),
-          name: String(o.name ?? "").trim(),
-          price: Number(o.price ?? 0),
-          ingredientId: o.ingredientId ? String(o.ingredientId).trim() : undefined,
-          qty: o.ingredientId ? Number(o.qty ?? 0) : undefined,
-        })).filter((o: any) => o.id && o.name) // quita opciones incompletas
+      ? options
+          .map((o: any) => ({
+            id: String(o.id ?? "").trim(),
+            name: String(o.name ?? "").trim(),
+            price: Number(o.price ?? 0),
+            imageUrl: o.imageUrl ? String(o.imageUrl).trim() : undefined, // ✅ NUEVO
+            ingredientId: o.ingredientId ? String(o.ingredientId).trim() : undefined,
+            qty: o.ingredientId ? Number(o.qty ?? 0) : undefined,
+          }))
+          .filter((o: any) => o.id && o.name)
       : [];
 
     const db = await getDB();
 
-    await db.collection<ModifierGroupDoc>("modifier_groups")
-.updateOne(
-      { _id: safeId }, // ✅ string, no ObjectId
+    await db.collection<ModifierGroupDoc>("modifier_groups").updateOne(
+      { _id: safeId },
       {
         $set: {
           _id: safeId,
@@ -66,10 +66,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error("[modifier-groups] POST error:", err);
-    return NextResponse.json(
-      { error: err?.message ?? "internal_error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err?.message ?? "internal_error" }, { status: 500 });
   }
 }
 
@@ -79,8 +76,7 @@ export async function DELETE(req: Request) {
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   const db = await getDB();
-  await db.collection<ModifierGroupDoc>("modifier_groups")
-.deleteOne({ _id: String(id).trim() });
+  await db.collection<ModifierGroupDoc>("modifier_groups").deleteOne({ _id: String(id).trim() });
 
   return NextResponse.json({ ok: true });
 }
