@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
 
 type ModifierGroup = { _id: string; name: string };
@@ -207,6 +208,13 @@ export default function ProductosPage() {
           </div>
         )}
       </div>
+       return (
+    <>
+      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
+      {/* resto de la página */}
+    </>
+  );
+
     </div>
   );
 }

@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import MobileTopBar from "@/components/MobileTopBar";
+
 type PaymentMethod = "cash" | "transfer" | "card";
 type WalletState = "available" | "pending";
 
 type Summary = {
+  
   byMethod: Record<PaymentMethod, Record<WalletState, number>>;
   availableTotal: number;
   pendingTotal: number;
@@ -55,6 +58,7 @@ function kindLabel(k: string) {
 }
 
 export default function CarteraPage() {
+  
   const [summary, setSummary] = useState<Summary | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
 
@@ -456,7 +460,13 @@ export default function CarteraPage() {
     </div>
   </div>
 )}
-
+return (
+    <>
+      <MobileTopBar title="Cartera" backTo="/dashboard" />
+      {/* resto de la página */}
+    </>
+  );
     </div>
   );
+  
 }

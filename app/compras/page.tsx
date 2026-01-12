@@ -1,7 +1,9 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import { createPurchase } from "@/lib/purchasesService";
+import MobileTopBar from "@/components/MobileTopBar";
 
 type Ingredient = {
   _id: string;
@@ -20,15 +22,20 @@ export default function ComprasPage() {
   const [ingredientId, setIngredientId] = useState("");
   const [qty, setQty] = useState<number>(1);
   const [unitCost, setUnitCost] = useState<number>(0);
-  const [cart, setCart] = useState<Array<{ ingredientId: string; name: string; unit: string; qty: number; unitCost: number }>>([]);
+  const [cart, setCart] = useState<
+    Array<{ ingredientId: string; name: string; unit: string; qty: number; unitCost: number }>
+  >([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string>("");
+
+  // ✅ NUEVO: meta para cartera
   const [payMethod, setPayMethod] = useState<"cash" | "transfer" | "card">("cash");
   const [payState, setPayState] = useState<"available" | "pending">("available");
+  const [category, setCategory] = useState("Insumos");
   const [supplier, setSupplier] = useState("");
 
   async function loadIngredients() {
-    const r = await fetch("/api/ingredients");
+    const r = await fetch("/api/ingredients", { cache: "no-store" });
     const d = await r.json();
     setIngredients(d.items ?? []);
   }
@@ -42,10 +49,7 @@ export default function ComprasPage() {
     [ingredients, ingredientId]
   );
 
-  const total = useMemo(
-    () => cart.reduce((s, it) => s + it.qty * it.unitCost, 0),
-    [cart]
-  );
+  const total = useMemo(() => cart.reduce((s, it) => s + it.qty * it.unitCost, 0), [cart]);
 
   function addLine() {
     setMsg("");
@@ -54,7 +58,6 @@ export default function ComprasPage() {
     if (!unitCost || unitCost <= 0) return setMsg("Costo unitario inválido.");
 
     setCart((prev) => {
-      // Si ya existe, acumula qty y actualiza unitCost al último (puedes cambiarlo si prefieres promedio)
       const idx = prev.findIndex((p) => p.ingredientId === selected._id);
       if (idx >= 0) {
         const next = [...prev];
@@ -88,11 +91,26 @@ export default function ComprasPage() {
   async function savePurchase() {
     setMsg("");
     if (!cart.length) return setMsg("Agrega al menos 1 insumo a la compra.");
+
+    // ✅ Reglas simples:
+    // - efectivo siempre available
+    // - transfer/card pueden ser pending si quieres registrarlo como "por pagar"
+    const stateToSend = payMethod === "cash" ? "available" : payState;
+
     setLoading(true);
     try {
-      await createPurchase(cart.map((c) => ({ ingredientId: c.ingredientId, qty: c.qty, unitCost: c.unitCost })));
+      await createPurchase(
+        cart.map((c) => ({ ingredientId: c.ingredientId, qty: c.qty, unitCost: c.unitCost })),
+        {
+          method: payMethod,
+          state: stateToSend,
+          category: category.trim() || "Insumos",
+          supplier: supplier.trim(),
+        }
+      );
+
       setCart([]);
-      setMsg("✅ Compra registrada y stock actualizado.");
+      setMsg("✅ Compra registrada, stock actualizado y cartera descontada.");
       await loadIngredients();
     } catch (e: any) {
       setMsg("❌ Error: " + (e?.message ?? "No se pudo registrar la compra"));
@@ -105,9 +123,72 @@ export default function ComprasPage() {
     <div className="p-4 space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">Compras</h1>
-        <p className="text-sm text-neutral-400">Registra compras de insumos (sube stock y guarda el gasto).</p>
+        <p className="text-sm text-neutral-400">
+          Registra compras de insumos (sube stock y descuenta cartera).
+        </p>
       </div>
 
+      {/* ✅ META (método/categoría/proveedor) */}
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
+        <div className="font-medium">Información del gasto</div>
+
+        <div className="grid md:grid-cols-4 gap-2">
+          <div>
+            <label className="text-sm text-neutral-400">Método de pago</label>
+            <select
+              value={payMethod}
+              onChange={(e) => {
+                const v = e.target.value as "cash" | "transfer" | "card";
+                setPayMethod(v);
+                if (v === "cash") setPayState("available"); // efectivo no puede ser pendiente
+              }}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+            >
+              <option value="cash">Efectivo</option>
+              <option value="transfer">Transferencia</option>
+              <option value="card">Tarjeta</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-neutral-400">Estado</label>
+            <select
+              value={payMethod === "cash" ? "available" : payState}
+              onChange={(e) => setPayState(e.target.value as any)}
+              disabled={payMethod === "cash"}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 disabled:opacity-60"
+            >
+              <option value="available">Disponible</option>
+              <option value="pending">Pendiente</option>
+            </select>
+            {payMethod === "cash" && (
+              <div className="mt-1 text-[11px] text-neutral-500">Efectivo siempre es disponible.</div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm text-neutral-400">Categoría</label>
+            <input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+              placeholder="Insumos, Gas, Renta..."
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-neutral-400">Proveedor (opcional)</label>
+            <input
+              value={supplier}
+              onChange={(e) => setSupplier(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+              placeholder="Costco, Sam’s..."
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* LÍNEAS DE COMPRA */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="grid md:grid-cols-4 gap-2">
           <div className="md:col-span-2">
@@ -152,10 +233,7 @@ export default function ComprasPage() {
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={addLine}
-            className="rounded-xl border border-neutral-700 px-4 py-2"
-          >
+          <button onClick={addLine} className="rounded-xl border border-neutral-700 px-4 py-2">
             + Agregar a compra
           </button>
 
@@ -171,6 +249,7 @@ export default function ComprasPage() {
         )}
       </div>
 
+      {/* DETALLE */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
         <div className="font-medium">Detalle</div>
 
@@ -179,17 +258,18 @@ export default function ComprasPage() {
         ) : (
           <div className="mt-3 space-y-2">
             {cart.map((c) => (
-              <div key={c.ingredientId} className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2">
+              <div
+                key={c.ingredientId}
+                className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+              >
                 <div>
                   <div className="text-sm font-medium">{c.name}</div>
                   <div className="text-xs text-neutral-400">
-                    {c.qty} {c.unit} × {money(c.unitCost)} = <span className="text-neutral-200">{money(c.qty * c.unitCost)}</span>
+                    {c.qty} {c.unit} × {money(c.unitCost)} ={" "}
+                    <span className="text-neutral-200">{money(c.qty * c.unitCost)}</span>
                   </div>
                 </div>
-                <button
-                  onClick={() => removeLine(c.ingredientId)}
-                  className="text-sm text-red-400 hover:text-red-300"
-                >
+                <button onClick={() => removeLine(c.ingredientId)} className="text-sm text-red-400 hover:text-red-300">
                   Quitar
                 </button>
               </div>
@@ -215,6 +295,13 @@ export default function ComprasPage() {
           </button>
         </div>
       </div>
+       return (
+    <>
+      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
+      {/* resto de la página */}
+    </>
+  );
+
     </div>
   );
 }

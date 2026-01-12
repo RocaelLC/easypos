@@ -4,11 +4,24 @@ export type PurchaseItemInput = {
   unitCost: number;
 };
 
-export async function createPurchase(items: PurchaseItemInput[]) {
+export type PurchaseMeta = {
+  method: "cash" | "transfer" | "card";
+  state?: "available" | "pending"; // por si luego lo usas en cartera (hoy lo recibimos)
+  category?: string;
+  supplier?: string;
+};
+
+export async function createPurchase(items: PurchaseItemInput[], meta?: PurchaseMeta) {
   const res = await fetch("/api/purchases", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({
+      items,
+      method: meta?.method ?? "cash",
+      state: meta?.state ?? "available",
+      category: meta?.category ?? "Insumos",
+      supplier: meta?.supplier ?? "",
+    }),
   });
 
   const data = await res.json().catch(() => null);

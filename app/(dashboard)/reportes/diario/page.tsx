@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
 
 type Method = "cash" | "transfer" | "card";
@@ -157,15 +158,16 @@ export default function ReporteDiario() {
       key: "month" as const,
       title: "Ventas del mes",
       subtitle: "Acumulado del mes",
-      total: monthData?.grand.total ?? 0,
-      count: monthData?.grand.count ?? 0,
+      total: monthData?.grand?.total ?? 0,
+      count: monthData?.grand?.count ?? 0,
+
     },
     {
       key: "year" as const,
       title: "Ventas del año",
       subtitle: "Acumulado del año",
-      total: yearData?.grand.total ?? 0,
-      count: yearData?.grand.count ?? 0,
+      total: yearData?.grand?.total ?? 0,
+      count: yearData?.grand?.count ?? 0,
     },
   ];
 
@@ -277,7 +279,7 @@ export default function ReporteDiario() {
         <Modal
           title={
             openScope === "day" ? `Ventas del día (${dayDate})` :
-            openScope === "month" ? "Ventas del mes" : "Ventas del año"
+              openScope === "month" ? "Ventas del mes" : "Ventas del año"
           }
           onClose={() => setOpenScope(null)}
         >
@@ -375,6 +377,14 @@ export default function ReporteDiario() {
           </div>
         </Modal>
       )}
+       return (
+    <>
+      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
+      {/* resto de la página */}
+    </>
+  );
+
     </div>
   );
+
 }

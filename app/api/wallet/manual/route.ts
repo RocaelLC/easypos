@@ -1,45 +1,52 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
-import { assertPositiveAmount, normalizeMethod, normalizeState } from "@/lib/wallet";
+
+type Method = "cash" | "transfer" | "card";
+type State = "available" | "pending";
+type Dir = "in" | "out";
 
 export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+  const body = await req.json().catch(() => null);
 
-    const direction = body.direction === "out" ? "out" : "in";
-    const amount = assertPositiveAmount(body.amount);
-    const method = normalizeMethod(body.method);
-    const state = normalizeState(body.state ?? "available");
-    const note = String(body.note ?? "").trim();
-    const kind = (body.kind === "adjustment") ? "adjustment" : "manual";
+  const direction = body?.direction as Dir;
+  const method = body?.method as Method;
+  const state = body?.state as State;
+  const kind = body?.kind as string; // "manual" | "adjustment"
+  const amount = Number(body?.amount ?? 0);
+  const note = String(body?.note ?? "").trim();
 
-    if (!note) {
-      return NextResponse.json({ error: "note_required" }, { status: 400 });
-    }
-
-    // 🔐 Usuario: por ahora placeholder (luego lo conectamos a Firebase token)
-    const createdByUid = String(body.createdByUid ?? "dev");
-    const createdByEmail = body.createdByEmail ? String(body.createdByEmail) : undefined;
-
-    const doc = {
-      amount,
-      direction,
-      method,
-      state,
-      kind,
-      note,
-      origin: { type: "manual" },
-      createdAt: new Date(),
-      createdByUid,
-      createdByEmail,
-    };
-
-    const db = await getDB();
-    await db.collection("wallet_movements").insertOne(doc);
-
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    console.error("[wallet/manual] error", e);
-    return NextResponse.json({ error: e?.message ?? "internal_error" }, { status: 500 });
+  if (!["in", "out"].includes(direction)) {
+    return NextResponse.json({ error: "direction invalid" }, { status: 400 });
   }
+  if (!["cash", "transfer", "card"].includes(method)) {
+    return NextResponse.json({ error: "method invalid" }, { status: 400 });
+  }
+  if (!["available", "pending"].includes(state)) {
+    return NextResponse.json({ error: "state invalid" }, { status: 400 });
+  }
+  if (!kind) {
+    return NextResponse.json({ error: "kind required" }, { status: 400 });
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return NextResponse.json({ error: "amount invalid" }, { status: 400 });
+  }
+  if (!note) {
+    return NextResponse.json({ error: "note required" }, { status: 400 });
+  }
+
+  // regla: efectivo nunca pendiente
+  const safeState: State = method === "cash" ? "available" : state;
+
+  const db = await getDB();
+  await db.collection("wallet_movements").insertOne({
+    direction,
+    method,
+    state: safeState,
+    kind,
+    amount,
+    note,
+    createdAt: new Date(),
+  });
+
+  return NextResponse.json({ ok: true });
 }

@@ -33,6 +33,33 @@ export async function POST(req: Request) {
     };
 
     await sales.insertOne(saleDoc);
+  // ✅ 2.1) Movimiento de cartera por venta (idempotente por clientSaleId)
+try {
+  const paymentMethod = String(body?.paymentMethod ?? "cash") as "cash" | "transfer" | "card";
+  const total = Number(body?.total ?? 0);
+
+  // regla inicial: tarjeta queda pendiente
+  const state = paymentMethod === "card" ? "pending" : "available";
+
+  await db.collection("wallet_movements").updateOne(
+    { kind: "sale", "origin.clientSaleId": String(clientSaleId) },
+    {
+      $setOnInsert: {
+        kind: "sale",
+        direction: "in",
+        method: paymentMethod,
+        state,
+        amount: total,
+        origin: { type: "sale", clientSaleId: String(clientSaleId) },
+        createdAt: new Date(body.createdAt ?? Date.now()),
+      },
+    },
+    { upsert: true }
+  );
+} catch {
+  // no rompemos la venta si cartera falla
+}
+
 
     // 3) Inventario (opcional): descuenta insumos según receta
     // Solo funciona si items trae productId y qty y existe colección products con recipe[]

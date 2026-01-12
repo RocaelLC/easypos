@@ -1,5 +1,6 @@
 "use client";
 
+import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
 
 type Ingredient = {
@@ -265,6 +266,13 @@ export default function InsumosPage() {
           </div>
         )}
       </div>
+       return (
+    <>
+      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
+      {/* resto de la página */}
+    </>
+  );
+
     </div>
   );
 }
