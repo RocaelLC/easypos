@@ -69,6 +69,57 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err?.message ?? "internal_error" }, { status: 500 });
   }
 }
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    const { id, name, min = 0, max = 0, required = false, options = [] } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "id required" }, { status: 400 });
+    }
+
+    const safeId = String(id).trim();
+
+    const safeOptions = Array.isArray(options)
+      ? options
+          .map((o: any) => ({
+            id: String(o.id ?? "").trim(),
+            name: String(o.name ?? "").trim(),
+            price: Number(o.price ?? 0),
+            ingredientId: o.ingredientId ? String(o.ingredientId).trim() : undefined,
+            qty: o.ingredientId ? Number(o.qty ?? 0) : undefined,
+          }))
+          .filter((o: any) => o.id && o.name)
+      : [];
+
+    const db = await getDB();
+    const col = db.collection<ModifierGroupDoc>("modifier_groups");
+
+    // Solo permite editar si existe (para evitar crear por accidente)
+    const exists = await col.findOne({ _id: safeId });
+    if (!exists) {
+      return NextResponse.json({ error: "group_not_found" }, { status: 404 });
+    }
+
+    await col.updateOne(
+      { _id: safeId },
+      {
+        $set: {
+          name: name !== undefined ? String(name).trim() : exists.name,
+          min: Number(min),
+          max: Number(max),
+          required: Boolean(required),
+          options: safeOptions,
+        },
+      }
+    );
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    console.error("[modifier-groups] PATCH error:", err);
+    return NextResponse.json({ error: err?.message ?? "internal_error" }, { status: 500 });
+  }
+}
 
 export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);

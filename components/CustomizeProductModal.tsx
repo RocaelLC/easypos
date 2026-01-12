@@ -111,25 +111,51 @@ export default function CustomizeProductModal({
       return { ...prev, [group._id]: current };
     });
   }
+const GROUP_RULES: Record<string, { included: number; extraPrice: number }> = {
+  toppings: { included: 1, extraPrice: 8 },
+  untables: { included: 1, extraPrice: 8 },
+};
 
-  const selections: Selection[] = useMemo(() => {
-    const out: Selection[] = [];
-    for (const g of groups) {
-      const set = picked[g._id] ?? new Set<string>();
-      for (const oid of set) {
-        const opt = g.options?.find((o) => o.id === oid);
-        if (!opt) continue;
+const selections: Selection[] = useMemo(() => {
+  const out: Selection[] = [];
+
+  for (const g of groups) {
+    const set = picked[g._id] ?? new Set<string>();
+    const pickedIds = Array.from(set);
+
+    // 1) opciones normales (con su price base)
+    for (const oid of pickedIds) {
+      const opt = g.options?.find((o) => o.id === oid);
+      if (!opt) continue;
+
+      out.push({
+        groupId: g._id,
+        groupName: g.name,
+        optionId: opt.id,
+        optionName: opt.name,
+        price: Number(opt.price ?? 0),
+      });
+    }
+
+    // 2) regla: 1 incluido, a partir del 2º cobrar +$8 c/u
+    const rule = GROUP_RULES[g._id];
+    if (rule) {
+      const extraCount = Math.max(0, pickedIds.length - rule.included);
+      if (extraCount > 0) {
         out.push({
           groupId: g._id,
           groupName: g.name,
-          optionId: opt.id,
-          optionName: opt.name,
-          price: Number(opt.price ?? 0),
+          optionId: "__extra__", // pseudo
+          optionName: `Extras (${extraCount})`,
+          price: extraCount * rule.extraPrice,
         });
       }
     }
-    return out;
-  }, [groups, picked]);
+  }
+
+  return out;
+}, [groups, picked]);
+
 
   const extras = useMemo(() => selections.reduce((s, x) => s + x.price, 0), [selections]);
   const unit = product.price + extras;

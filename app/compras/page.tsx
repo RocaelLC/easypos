@@ -23,6 +23,9 @@ export default function ComprasPage() {
   const [cart, setCart] = useState<Array<{ ingredientId: string; name: string; unit: string; qty: number; unitCost: number }>>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string>("");
+  const [payMethod, setPayMethod] = useState<"cash" | "transfer" | "card">("cash");
+  const [payState, setPayState] = useState<"available" | "pending">("available");
+  const [supplier, setSupplier] = useState("");
 
   async function loadIngredients() {
     const r = await fetch("/api/ingredients");
