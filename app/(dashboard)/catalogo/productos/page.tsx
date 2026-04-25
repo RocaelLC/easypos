@@ -1,8 +1,8 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
+import { safeFetchJSON } from "@/lib/safeFetchJSON";
 
 type ModifierGroup = { _id: string; name: string };
 type Product = {
@@ -14,13 +14,16 @@ type Product = {
   modifierGroupIds: string[];
 };
 
+type ApiError = {
+  error?: string;
+};
+
 export default function ProductosPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // form
   const [pid, setPid] = useState("");
   const [pname, setPname] = useState("");
   const [pprice, setPprice] = useState<number>(0);
@@ -28,23 +31,31 @@ export default function ProductosPage() {
   const [pactive, setPactive] = useState(true);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
 
-  const normalizeId = (v: string) =>
-    v.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
+  const normalizeId = (value: string) =>
+    value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
 
   async function loadAll() {
-    const [p, g] = await Promise.all([fetch("/api/products"), fetch("/api/modifier-groups")]);
-    const pd = await p.json();
-    const gd = await g.json();
-    setProducts(pd.items ?? []);
-    setGroups(gd.items ?? []);
+    const [productsData, groupsData] = await Promise.all([
+      safeFetchJSON<{ items?: Product[] }>("/api/products", { cache: "no-store" }),
+      safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" }),
+    ]);
+
+    setProducts(productsData.items ?? []);
+    setGroups(groupsData.items ?? []);
   }
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    loadAll().catch((error) => {
+      console.error("Error loading catalog products:", error);
+      setProducts([]);
+      setGroups([]);
+    });
+  }, []);
 
   const canSave = useMemo(() => normalizeId(pid) && pname.trim(), [pid, pname]);
 
   function toggleGroup(id: string) {
-    setSelectedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setSelectedGroups((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   }
 
   async function saveProduct() {
@@ -65,17 +76,31 @@ export default function ProductosPage() {
           category: pcat.trim() || "general",
           active: Boolean(pactive),
           modifierGroupIds: selectedGroups,
-          recipe: [], // luego lo conectamos con inventario (receta base)
+          recipe: [],
         }),
       });
-      const data = await res.json().catch(() => null);
+
+      const text = await res.text();
+      let data: { error?: string } | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/products: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "save_failed");
 
       setMsg("✅ Producto guardado.");
-      setPid(""); setPname(""); setPprice(0); setPcat("general"); setPactive(true); setSelectedGroups([]);
+      setPid("");
+      setPname("");
+      setPprice(0);
+      setPcat("general");
+      setPactive(true);
+      setSelectedGroups([]);
       await loadAll();
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo guardar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo guardar"));
     } finally {
       setLoading(false);
     }
@@ -87,12 +112,20 @@ export default function ProductosPage() {
     setMsg("");
     try {
       const res = await fetch(`/api/products?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-      const data = await res.json().catch(() => null);
+      const text = await res.text();
+      let data: ApiError | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/products: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "delete_failed");
       setMsg("✅ Eliminado.");
       await loadAll();
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo eliminar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo eliminar"));
     } finally {
       setLoading(false);
     }
@@ -103,66 +136,83 @@ export default function ProductosPage() {
       <div>
         <h1 className="text-2xl font-semibold">Productos</h1>
         <p className="text-sm text-neutral-400">
-          Crea productos y asígnales grupos de modificadores (Tamaño, Toppings, etc.).
+          Crea productos y asignales grupos de modificadores (Tamano, Toppings, etc.).
         </p>
       </div>
 
-      {/* Crear producto */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="font-medium">Nuevo producto</div>
 
         <div className="grid md:grid-cols-6 gap-2">
           <div className="md:col-span-2">
             <label className="text-xs text-neutral-400">ID producto</label>
-            <input value={pid} onChange={(e)=>setPid(e.target.value)} placeholder="fresas-base"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
-            <div className="text-xs text-neutral-500 mt-1">Normaliza: <span className="text-neutral-300">{normalizeId(pid || "…")}</span></div>
+            <input
+              value={pid}
+              onChange={(e) => setPid(e.target.value)}
+              placeholder="fresas-base"
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+            />
+            <div className="text-xs text-neutral-500 mt-1">
+              Normaliza: <span className="text-neutral-300">{normalizeId(pid || "...")}</span>
+            </div>
           </div>
 
           <div className="md:col-span-2">
             <label className="text-xs text-neutral-400">Nombre</label>
-            <input value={pname} onChange={(e)=>setPname(e.target.value)} placeholder="Fresas con crema"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
+            <input
+              value={pname}
+              onChange={(e) => setPname(e.target.value)}
+              placeholder="Fresas con crema"
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+            />
           </div>
 
           <div>
             <label className="text-xs text-neutral-400">Precio</label>
-            <input type="number" step="0.01" value={pprice} onChange={(e)=>setPprice(Number(e.target.value))}
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
+            <input
+              type="number"
+              step="0.01"
+              value={pprice}
+              onChange={(e) => setPprice(Number(e.target.value))}
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+            />
           </div>
 
           <div>
-            <label className="text-xs text-neutral-400">Categoría</label>
-            <input value={pcat} onChange={(e)=>setPcat(e.target.value)} placeholder="postres / frappes"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2" />
+            <label className="text-xs text-neutral-400">Categoria</label>
+            <input
+              value={pcat}
+              onChange={(e) => setPcat(e.target.value)}
+              placeholder="postres / frappes"
+              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+            />
           </div>
         </div>
 
         <label className="flex items-center gap-2 text-sm text-neutral-300">
-          <input type="checkbox" checked={pactive} onChange={(e)=>setPactive(e.target.checked)} />
+          <input type="checkbox" checked={pactive} onChange={(e) => setPactive(e.target.checked)} />
           Activo
         </label>
 
-        {/* Asignar grupos */}
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
           <div className="text-sm font-medium">Grupos de modificadores</div>
           {groups.length === 0 ? (
             <div className="text-sm text-neutral-400 mt-2">
-              Aún no hay grupos. Crea primero en “Modificadores”.
+              Aun no hay grupos. Crea primero en &quot;Modificadores&quot;.
             </div>
           ) : (
             <div className="mt-2 flex flex-wrap gap-2">
-              {groups.map(g => {
-                const on = selectedGroups.includes(g._id);
+              {groups.map((group) => {
+                const on = selectedGroups.includes(group._id);
                 return (
                   <button
-                    key={g._id}
-                    onClick={() => toggleGroup(g._id)}
+                    key={group._id}
+                    onClick={() => toggleGroup(group._id)}
                     className={`rounded-full border px-3 py-1 text-sm ${
                       on ? "border-green-500 bg-green-500/10" : "border-neutral-700"
                     }`}
                   >
-                    {g.name}
+                    {group.name}
                   </button>
                 );
               })}
@@ -183,24 +233,31 @@ export default function ProductosPage() {
         </div>
       </div>
 
-      {/* Lista */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
         <div className="font-medium">Listado</div>
 
         {products.length === 0 ? (
-          <div className="text-sm text-neutral-400 mt-2">Aún no hay productos.</div>
+          <div className="text-sm text-neutral-400 mt-2">Aun no hay productos.</div>
         ) : (
           <div className="mt-3 space-y-2">
-            {products.map(p => (
-              <div key={p._id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2">
+            {products.map((product) => (
+              <div
+                key={product._id}
+                className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+              >
                 <div>
-                  <div className="text-sm font-medium">{p.name} <span className="text-xs text-neutral-500">(_id: {p._id})</span>
-</div>
+                  <div className="text-sm font-medium">
+                    {product.name} <span className="text-xs text-neutral-500">(_id: {product._id})</span>
+                  </div>
                   <div className="text-xs text-neutral-400 mt-1">
-                    ${p.price} · {p.category} · {p.active ? "activo" : "inactivo"} · grupos: {p.modifierGroupIds?.length ?? 0}
+                    ${product.price} · {product.category} · {product.active ? "activo" : "inactivo"} · grupos:{" "}
+                    {product.modifierGroupIds?.length ?? 0}
                   </div>
                 </div>
-                <button onClick={() => deleteProduct(p._id)} className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm">
+                <button
+                  onClick={() => deleteProduct(product._id)}
+                  className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm"
+                >
                   Eliminar
                 </button>
               </div>
@@ -208,13 +265,6 @@ export default function ProductosPage() {
           </div>
         )}
       </div>
-       return (
-    <>
-      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
-      {/* resto de la página */}
-    </>
-  );
-
     </div>
   );
 }

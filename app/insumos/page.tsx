@@ -1,7 +1,7 @@
 "use client";
 
-import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
+import { safeFetchJSON } from "@/lib/safeFetchJSON";
 
 type Ingredient = {
   _id: string;
@@ -20,7 +20,6 @@ export default function InsumosPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // Form
   const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [unit, setUnit] = useState<"g" | "ml" | "pz">("g");
@@ -28,24 +27,29 @@ export default function InsumosPage() {
   const [minStock, setMinStock] = useState<number>(0);
   const [avgCost, setAvgCost] = useState<number>(0);
 
+  type ApiError = {
+    error?: string;
+  };
+
   const lowStock = useMemo(
-    () => items.filter((i) => Number(i.stock) <= Number(i.minStock)).map((i) => i._id),
+    () => items.filter((item) => Number(item.stock) <= Number(item.minStock)).map((item) => item._id),
     [items]
   );
 
   async function load() {
-    const r = await fetch("/api/ingredients");
-    const d = await r.json();
-    setItems(d.items ?? []);
+    const data = await safeFetchJSON<{ items?: Ingredient[] }>("/api/ingredients", { cache: "no-store" });
+    setItems(data.items ?? []);
   }
 
   useEffect(() => {
-    load();
+    load().catch((error) => {
+      console.error("Error loading ingredients:", error);
+      setItems([]);
+    });
   }, []);
 
-  function normalizeId(v: string) {
-    // _id lógico: minúsculas, sin espacios, solo letras/números/guiones
-    return v
+  function normalizeId(value: string) {
+    return value
       .trim()
       .toLowerCase()
       .replace(/\s+/g, "-")
@@ -74,7 +78,15 @@ export default function InsumosPage() {
         }),
       });
 
-      const data = await res.json().catch(() => null);
+      const text = await res.text();
+      let data: { error?: string } | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/ingredients: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "create_failed");
 
       setMsg("✅ Insumo guardado.");
@@ -85,8 +97,8 @@ export default function InsumosPage() {
       setMinStock(0);
       setAvgCost(0);
       await load();
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo guardar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo guardar"));
     } finally {
       setLoading(false);
     }
@@ -100,12 +112,21 @@ export default function InsumosPage() {
       const res = await fetch(`/api/ingredients?id=${encodeURIComponent(ingredientId)}`, {
         method: "DELETE",
       });
-      const data = await res.json().catch(() => null);
+
+      const text = await res.text();
+      let data: ApiError | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/ingredients: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "delete_failed");
       setMsg("✅ Eliminado.");
       await load();
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo eliminar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo eliminar"));
     } finally {
       setLoading(false);
     }
@@ -116,18 +137,17 @@ export default function InsumosPage() {
       <div>
         <h1 className="text-2xl font-semibold">Insumos</h1>
         <p className="text-sm text-neutral-400">
-          Crea y administra tus insumos (inventario base). Usa IDs lógicos: <span className="text-neutral-200">fresas</span>,{" "}
+          Crea y administra tus insumos (inventario base). Usa IDs logicos: <span className="text-neutral-200">fresas</span>,{" "}
           <span className="text-neutral-200">leche-entera</span>, <span className="text-neutral-200">vaso-12oz</span>.
         </p>
       </div>
 
-      {/* FORM */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="font-medium">Nuevo insumo</div>
 
         <div className="grid md:grid-cols-6 gap-2">
           <div className="md:col-span-2">
-            <label className="text-xs text-neutral-400">ID (único)</label>
+            <label className="text-xs text-neutral-400">ID (unico)</label>
             <input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -135,7 +155,7 @@ export default function InsumosPage() {
               className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
             />
             <div className="text-xs text-neutral-500 mt-1">
-              Se normaliza a: <span className="text-neutral-300">{normalizeId(id || "…")}</span>
+              Se normaliza a: <span className="text-neutral-300">{normalizeId(id || "...")}</span>
             </div>
           </div>
 
@@ -153,7 +173,7 @@ export default function InsumosPage() {
             <label className="text-xs text-neutral-400">Unidad</label>
             <select
               value={unit}
-              onChange={(e) => setUnit(e.target.value as any)}
+              onChange={(e) => setUnit(e.target.value as "g" | "ml" | "pz")}
               className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
             >
               <option value="g">g</option>
@@ -173,7 +193,7 @@ export default function InsumosPage() {
           </div>
 
           <div>
-            <label className="text-xs text-neutral-400">Mínimo</label>
+            <label className="text-xs text-neutral-400">Minimo</label>
             <input
               type="number"
               value={minStock}
@@ -203,36 +223,33 @@ export default function InsumosPage() {
             {loading ? "Guardando..." : "Guardar insumo"}
           </button>
 
-          {msg && (
-            <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>{msg}</div>
-          )}
+          {msg && <div className={`text-sm ${msg.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>{msg}</div>}
         </div>
       </div>
 
-      {/* LIST */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
         <div className="flex items-center justify-between">
           <div className="font-medium">Lista</div>
-          <button onClick={load} className="text-sm text-neutral-300 hover:text-white">
+          <button onClick={() => load()} className="text-sm text-neutral-300 hover:text-white">
             Refrescar
           </button>
         </div>
 
         {items.length === 0 ? (
-          <div className="text-sm text-neutral-400 mt-2">Aún no hay insumos. Crea el primero arriba.</div>
+          <div className="text-sm text-neutral-400 mt-2">Aun no hay insumos. Crea el primero arriba.</div>
         ) : (
           <div className="mt-3 space-y-2">
-            {items.map((i) => {
-              const isLow = lowStock.includes(i._id);
+            {items.map((item) => {
+              const isLow = lowStock.includes(item._id);
               return (
                 <div
-                  key={i._id}
+                  key={item._id}
                   className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
                 >
                   <div>
                     <div className="text-sm font-medium flex items-center gap-2">
-                      <span>{i.name}</span>
-                      <span className="text-xs text-neutral-500">(_id: {i._id})</span>
+                      <span>{item.name}</span>
+                      <span className="text-xs text-neutral-500">(_id: {item._id})</span>
                       {isLow && (
                         <span className="text-xs rounded-full border border-yellow-600 text-yellow-300 px-2 py-0.5">
                           Bajo stock
@@ -240,21 +257,18 @@ export default function InsumosPage() {
                       )}
                     </div>
                     <div className="text-xs text-neutral-400 mt-1">
-                      Stock: <span className="text-neutral-200">{i.stock}</span> {i.unit} · Mínimo:{" "}
-                      <span className="text-neutral-200">{i.minStock}</span> · Costo prom:{" "}
-                      <span className="text-neutral-200">{money(i.avgCost)}</span>
+                      Stock: <span className="text-neutral-200">{item.stock}</span> {item.unit} · Minimo:{" "}
+                      <span className="text-neutral-200">{item.minStock}</span> · Costo prom:{" "}
+                      <span className="text-neutral-200">{money(item.avgCost)}</span>
                     </div>
                   </div>
 
                   <div className="flex gap-2">
-                    <a
-                      href="/compras"
-                      className="rounded-xl border border-neutral-700 px-3 py-2 text-sm"
-                    >
+                    <a href="/compras" className="rounded-xl border border-neutral-700 px-3 py-2 text-sm">
                       Comprar
                     </a>
                     <button
-                      onClick={() => removeIngredient(i._id)}
+                      onClick={() => removeIngredient(item._id)}
                       className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm hover:bg-red-500/10"
                     >
                       Eliminar
@@ -266,13 +280,6 @@ export default function InsumosPage() {
           </div>
         )}
       </div>
-       return (
-    <>
-      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
-      {/* resto de la página */}
-    </>
-  );
-
     </div>
   );
 }

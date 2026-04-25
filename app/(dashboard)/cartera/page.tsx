@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-import MobileTopBar from "@/components/MobileTopBar";
+import { safeFetchJSON } from "@/lib/safeFetchJSON";
 
 type PaymentMethod = "cash" | "transfer" | "card";
 type WalletState = "available" | "pending";
 
 type Summary = {
-  
   byMethod: Record<PaymentMethod, Record<WalletState, number>>;
   availableTotal: number;
   pendingTotal: number;
@@ -35,52 +33,53 @@ function money(n: number) {
   return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n || 0);
 }
 
-function methodLabel(m: PaymentMethod) {
-  if (m === "cash") return "Efectivo";
-  if (m === "transfer") return "Transferencia";
+function methodLabel(method: PaymentMethod) {
+  if (method === "cash") return "Efectivo";
+  if (method === "transfer") return "Transferencia";
   return "Tarjeta";
 }
 
-function stateLabel(s: WalletState) {
-  return s === "pending" ? "Pendiente" : "Disponible";
+function stateLabel(state: WalletState) {
+  return state === "pending" ? "Pendiente" : "Disponible";
 }
 
-function kindLabel(k: string) {
-  switch (k) {
-    case "sale": return "Venta";
-    case "expense": return "Gasto";
-    case "manual": return "Movimiento";
-    case "cash_count": return "Corte";
-    case "adjustment": return "Ajuste";
-    case "settlement": return "Liquidación";
-    default: return k || "Movimiento";
+function kindLabel(kind: string) {
+  switch (kind) {
+    case "sale":
+      return "Venta";
+    case "expense":
+      return "Gasto";
+    case "manual":
+      return "Movimiento";
+    case "cash_count":
+      return "Corte";
+    case "adjustment":
+      return "Ajuste";
+    case "settlement":
+      return "Liquidacion";
+    default:
+      return kind || "Movimiento";
   }
 }
 
 export default function CarteraPage() {
-  
   const [summary, setSummary] = useState<Summary | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
-
   const [mDirection, setMDirection] = useState<"in" | "out">("in");
   const [mKind, setMKind] = useState<"manual" | "adjustment">("manual");
   const [mMethod, setMMethod] = useState<PaymentMethod>("cash");
   const [mState, setMState] = useState<WalletState>("available");
   const [mAmount, setMAmount] = useState<number>(0);
   const [mNote, setMNote] = useState<string>("");
-
   const [saving, setSaving] = useState(false);
   const [formMsg, setFormMsg] = useState<string>("");
-
   const [openDetail, setOpenDetail] = useState(true);
-
   const [items, setItems] = useState<Movement[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(false);
 
   async function loadSummary() {
-    const res = await fetch("/api/wallet/summary", { cache: "no-store" });
-    const data = await res.json();
+    const data = await safeFetchJSON<Summary>("/api/wallet/summary", { cache: "no-store" });
     setSummary(data);
   }
 
@@ -91,10 +90,12 @@ export default function CarteraPage() {
       url.searchParams.set("limit", "50");
       if (!reset && cursor) url.searchParams.set("cursor", cursor);
 
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      const data = await res.json();
-      const newItems: Movement[] = Array.isArray(data?.items) ? data.items : [];
-      const nextCursor: string | null = data?.nextCursor ?? null;
+      const data = await safeFetchJSON<{ items?: Movement[]; nextCursor?: string | null }>(url.toString(), {
+        cache: "no-store",
+      });
+
+      const newItems = Array.isArray(data?.items) ? data.items : [];
+      const nextCursor = data?.nextCursor ?? null;
 
       if (reset) setItems(newItems);
       else setItems((prev) => [...prev, ...newItems]);
@@ -104,6 +105,7 @@ export default function CarteraPage() {
       setLoadingList(false);
     }
   }
+
   async function saveManual() {
     setFormMsg("");
 
@@ -112,11 +114,10 @@ export default function CarteraPage() {
       return;
     }
     if (!Number.isFinite(mAmount) || mAmount <= 0) {
-      setFormMsg("❌ Monto inválido.");
+      setFormMsg("❌ Monto invalido.");
       return;
     }
 
-    // regla simple: efectivo no debería ser pendiente (lo forzamos a available)
     const stateToSend: WalletState = mMethod === "cash" ? "available" : mState;
 
     setSaving(true);
@@ -134,12 +135,18 @@ export default function CarteraPage() {
         }),
       });
 
-      const data = await res.json().catch(() => null);
+      const text = await res.text();
+      let data: { error?: string } | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/wallet/manual: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "save_failed");
 
       setManualOpen(false);
-
-      // reset form
       setMDirection("in");
       setMKind("manual");
       setMMethod("cash");
@@ -150,32 +157,29 @@ export default function CarteraPage() {
 
       await loadSummary();
       await loadMovements(true);
-    } catch (e: any) {
-      setFormMsg("❌ Error: " + (e?.message ?? "No se pudo guardar"));
+    } catch (error: unknown) {
+      setFormMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo guardar"));
     } finally {
       setSaving(false);
     }
   }
 
   useEffect(() => {
-    loadSummary();
-    loadMovements(true);
+    loadSummary().catch((error) => console.error("Error loading wallet summary:", error));
+    loadMovements(true).catch((error) => console.error("Error loading wallet movements:", error));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const detail = useMemo(() => {
     if (!summary) return null;
-    const cash = summary.byMethod.cash;
-    const transfer = summary.byMethod.transfer;
-    const card = summary.byMethod.card;
 
     return {
-      cashAvailable: cash.available,
-      cashPending: cash.pending,
-      transferAvailable: transfer.available,
-      transferPending: transfer.pending,
-      cardAvailable: card.available,
-      cardPending: card.pending,
+      cashAvailable: summary.byMethod.cash.available,
+      cashPending: summary.byMethod.cash.pending,
+      transferAvailable: summary.byMethod.transfer.available,
+      transferPending: summary.byMethod.transfer.pending,
+      cardAvailable: summary.byMethod.card.available,
+      cardPending: summary.byMethod.card.pending,
       bankAvail: summary.bankSubtotal.available,
       bankPend: summary.bankSubtotal.pending,
       bankTotal: summary.bankSubtotal.total,
@@ -184,7 +188,6 @@ export default function CarteraPage() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white">
-      {/* Header fijo */}
       <div className="sticky top-0 z-40 border-b border-neutral-800 bg-neutral-950/90 backdrop-blur">
         <div className="mx-auto w-full max-w-6xl px-4 py-4">
           <div className="flex items-start justify-between gap-3">
@@ -210,35 +213,27 @@ export default function CarteraPage() {
                 Actualizar
               </button>
             </div>
-
           </div>
 
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
               <div className="text-xs text-neutral-400">Total disponible</div>
-              <div className="mt-1 text-3xl font-semibold">
-                {money(summary?.availableTotal ?? 0)}
-              </div>
+              <div className="mt-1 text-3xl font-semibold">{money(summary?.availableTotal ?? 0)}</div>
             </div>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
               <div className="text-xs text-neutral-400">Pendiente</div>
-              <div className="mt-1 text-2xl font-semibold text-neutral-200">
-                {money(summary?.pendingTotal ?? 0)}
-              </div>
-              <div className="mt-1 text-xs text-neutral-500">
-                (Tarjeta / Transferencia por liquidar)
-              </div>
+              <div className="mt-1 text-2xl font-semibold text-neutral-200">{money(summary?.pendingTotal ?? 0)}</div>
+              <div className="mt-1 text-xs text-neutral-500">(Tarjeta / Transferencia por liquidar)</div>
             </div>
           </div>
 
-          {/* Desglose */}
           <button
-            onClick={() => setOpenDetail((v) => !v)}
+            onClick={() => setOpenDetail((value) => !value)}
             className="mt-3 w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left hover:bg-neutral-900"
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">Detalle por método</div>
+              <div className="text-sm font-medium">Detalle por metodo</div>
               <div className="text-xs text-neutral-400">{openDetail ? "Ocultar" : "Mostrar"}</div>
             </div>
 
@@ -274,49 +269,49 @@ export default function CarteraPage() {
         </div>
       </div>
 
-      {/* Body */}
       <div className="mx-auto w-full max-w-6xl px-4 py-6">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Movimientos</h2>
-          <div className="text-xs text-neutral-500">Todo queda registrado. No hay edición de saldo.</div>
+          <div className="text-xs text-neutral-500">Todo queda registrado. No hay edicion de saldo.</div>
         </div>
 
         <div className="mt-4 space-y-3">
           {items.length === 0 ? (
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 text-sm text-neutral-400">
-              Aún no hay movimientos.
+              Aun no hay movimientos.
             </div>
           ) : (
-            items.map((m) => {
-              const sign = m.direction === "in" ? "+" : "-";
-              const amount = money(m.amount);
+            items.map((movement) => {
+              const sign = movement.direction === "in" ? "+" : "-";
+              const amount = money(movement.amount);
               const badge =
-                m.direction === "in"
+                movement.direction === "in"
                   ? "bg-emerald-500/15 text-emerald-300 border-emerald-700/40"
                   : "bg-rose-500/15 text-rose-300 border-rose-700/40";
 
               return (
-                <div key={m._id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
+                <div key={movement._id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold">
-                        {kindLabel(m.kind)} · {methodLabel(m.method)} ({stateLabel(m.state)})
+                        {kindLabel(movement.kind)} · {methodLabel(movement.method)} ({stateLabel(movement.state)})
                       </div>
                       <div className="mt-1 text-xs text-neutral-400">
-                        {new Date(m.createdAt).toLocaleString("es-MX")}
-                        {m.createdByEmail ? ` · ${m.createdByEmail}` : ""}
+                        {new Date(movement.createdAt).toLocaleString("es-MX")}
+                        {movement.createdByEmail ? ` · ${movement.createdByEmail}` : ""}
                       </div>
-                      {(m.category || m.supplier || m.note) && (
+                      {(movement.category || movement.supplier || movement.note) && (
                         <div className="mt-2 text-xs text-neutral-300 space-y-1">
-                          {m.category && <div>Categoría: {m.category}</div>}
-                          {m.supplier && <div>Proveedor: {m.supplier}</div>}
-                          {m.note && <div>Nota: {m.note}</div>}
+                          {movement.category && <div>Categoria: {movement.category}</div>}
+                          {movement.supplier && <div>Proveedor: {movement.supplier}</div>}
+                          {movement.note && <div>Nota: {movement.note}</div>}
                         </div>
                       )}
                     </div>
 
                     <div className={`rounded-full border px-3 py-1 text-sm font-semibold ${badge}`}>
-                      {sign}{amount}
+                      {sign}
+                      {amount}
                     </div>
                   </div>
                 </div>
@@ -331,142 +326,136 @@ export default function CarteraPage() {
             onClick={() => loadMovements(false)}
             className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm hover:bg-neutral-900 disabled:opacity-50"
           >
-            {loadingList ? "Cargando..." : cursor ? "Cargar más" : "No hay más"}
+            {loadingList ? "Cargando..." : cursor ? "Cargar mas" : "No hay mas"}
           </button>
         </div>
       </div>
+
       {manualOpen && (
-  <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60">
-    <div className="w-full md:max-w-lg rounded-t-2xl md:rounded-2xl bg-neutral-950 border border-neutral-800 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-lg font-semibold">Registrar movimiento</div>
-          <div className="text-xs text-neutral-400">
-            La cartera no se edita directo; esto genera un movimiento con rastro.
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60">
+          <div className="w-full md:max-w-lg rounded-t-2xl md:rounded-2xl bg-neutral-950 border border-neutral-800 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold">Registrar movimiento</div>
+                <div className="text-xs text-neutral-400">
+                  La cartera no se edita directo; esto genera un movimiento con rastro.
+                </div>
+              </div>
+              <button
+                onClick={() => setManualOpen(false)}
+                className="rounded-xl border border-neutral-700 px-3 py-2 text-sm"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-neutral-400">Tipo</label>
+                <select
+                  value={mDirection}
+                  onChange={(e) => setMDirection(e.target.value as "in" | "out")}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+                >
+                  <option value="in">Ingreso (+)</option>
+                  <option value="out">Egreso (-)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400">Clasificacion</label>
+                <select
+                  value={mKind}
+                  onChange={(e) => setMKind(e.target.value as "manual" | "adjustment")}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+                >
+                  <option value="manual">Manual</option>
+                  <option value="adjustment">Ajuste</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400">Metodo</label>
+                <select
+                  value={mMethod}
+                  onChange={(e) => {
+                    const value = e.target.value as PaymentMethod;
+                    setMMethod(value);
+                    if (value === "cash") setMState("available");
+                  }}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="transfer">Transferencia</option>
+                  <option value="card">Tarjeta</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400">Estado</label>
+                <select
+                  value={mMethod === "cash" ? "available" : mState}
+                  onChange={(e) => setMState(e.target.value as WalletState)}
+                  disabled={mMethod === "cash"}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 disabled:opacity-60"
+                >
+                  <option value="available">Disponible</option>
+                  <option value="pending">Pendiente</option>
+                </select>
+                {mMethod === "cash" && (
+                  <div className="mt-1 text-[11px] text-neutral-500">
+                    Efectivo siempre se considera disponible.
+                  </div>
+                )}
+              </div>
+
+              <div className="col-span-2">
+                <label className="text-xs text-neutral-400">Monto</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={mAmount || ""}
+                  onChange={(e) => setMAmount(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="text-xs text-neutral-400">Nota (obligatoria)</label>
+                <input
+                  value={mNote}
+                  onChange={(e) => setMNote(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
+                  placeholder='Ej: "Retiro personal", "Meter cambio", "Ajuste por diferencia"...'
+                />
+              </div>
+            </div>
+
+            {formMsg && (
+              <div className={`mt-3 text-sm ${formMsg.startsWith("❌") ? "text-red-400" : "text-emerald-300"}`}>
+                {formMsg}
+              </div>
+            )}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setManualOpen(false)}
+                className="flex-1 rounded-xl border border-neutral-700 py-2"
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={saving}
+                onClick={saveManual}
+                className="flex-1 rounded-xl bg-green-500 text-black py-2 font-medium disabled:opacity-50"
+              >
+                {saving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => setManualOpen(false)}
-          className="rounded-xl border border-neutral-700 px-3 py-2 text-sm"
-        >
-          Cerrar
-        </button>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-xs text-neutral-400">Tipo</label>
-          <select
-            value={mDirection}
-            onChange={(e) => setMDirection(e.target.value as any)}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-          >
-            <option value="in">Ingreso (+)</option>
-            <option value="out">Egreso (-)</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-xs text-neutral-400">Clasificación</label>
-          <select
-            value={mKind}
-            onChange={(e) => setMKind(e.target.value as any)}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-          >
-            <option value="manual">Manual</option>
-            <option value="adjustment">Ajuste</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-xs text-neutral-400">Método</label>
-          <select
-            value={mMethod}
-            onChange={(e) => {
-              const v = e.target.value as PaymentMethod;
-              setMMethod(v);
-              if (v === "cash") setMState("available");
-            }}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-          >
-            <option value="cash">Efectivo</option>
-            <option value="transfer">Transferencia</option>
-            <option value="card">Tarjeta</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-xs text-neutral-400">Estado</label>
-          <select
-            value={mMethod === "cash" ? "available" : mState}
-            onChange={(e) => setMState(e.target.value as WalletState)}
-            disabled={mMethod === "cash"}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 disabled:opacity-60"
-          >
-            <option value="available">Disponible</option>
-            <option value="pending">Pendiente</option>
-          </select>
-          {mMethod === "cash" && (
-            <div className="mt-1 text-[11px] text-neutral-500">
-              Efectivo siempre se considera disponible.
-            </div>
-          )}
-        </div>
-
-        <div className="col-span-2">
-          <label className="text-xs text-neutral-400">Monto</label>
-          <input
-            type="number"
-            step="0.01"
-            value={mAmount || ""}
-            onChange={(e) => setMAmount(Number(e.target.value))}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            placeholder="0.00"
-          />
-        </div>
-
-        <div className="col-span-2">
-          <label className="text-xs text-neutral-400">Nota (obligatoria)</label>
-          <input
-            value={mNote}
-            onChange={(e) => setMNote(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
-            placeholder='Ej: "Retiro personal", "Meter cambio", "Ajuste por diferencia"...'
-          />
-        </div>
-      </div>
-
-      {formMsg && (
-        <div className={`mt-3 text-sm ${formMsg.startsWith("❌") ? "text-red-400" : "text-emerald-300"}`}>
-          {formMsg}
-        </div>
       )}
-
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={() => setManualOpen(false)}
-          className="flex-1 rounded-xl border border-neutral-700 py-2"
-        >
-          Cancelar
-        </button>
-        <button
-          disabled={saving}
-          onClick={saveManual}
-          className="flex-1 rounded-xl bg-green-500 text-black py-2 font-medium disabled:opacity-50"
-        >
-          {saving ? "Guardando..." : "Guardar"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-return (
-    <>
-      <MobileTopBar title="Cartera" backTo="/dashboard" />
-      {/* resto de la página */}
-    </>
-  );
     </div>
   );
-  
 }

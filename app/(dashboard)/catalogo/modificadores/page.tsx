@@ -1,10 +1,17 @@
 "use client";
 export const dynamic = "force-dynamic";
-import MobileTopBar from "@/components/MobileTopBar";
 
 import { useEffect, useMemo, useState } from "react";
+import { safeFetchJSON } from "@/lib/safeFetchJSON";
 
-type Ingredient = { _id: string; name: string; unit: "g" | "ml" | "pz"; stock: number; minStock: number; avgCost: number };
+type Ingredient = {
+  _id: string;
+  name: string;
+  unit: "g" | "ml" | "pz";
+  stock: number;
+  minStock: number;
+  avgCost: number;
+};
 
 type ModifierOption = {
   id: string;
@@ -18,7 +25,7 @@ type ModifierGroup = {
   _id: string;
   name: string;
   min: number;
-  max: number; // 0 = sin límite
+  max: number;
   required: boolean;
   options: ModifierOption[];
 };
@@ -29,56 +36,59 @@ export default function ModificadoresPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // ✅ EDICIÓN
-  const [editingId, setEditingId] = useState<string>("");        // si no está vacío => editando
-  const [pickGroupId, setPickGroupId] = useState<string>("");    // selector de grupo existente para cargar
+  const [editingId, setEditingId] = useState<string>("");
+  const [pickGroupId, setPickGroupId] = useState<string>("");
 
-  // Form grupo
   const [gid, setGid] = useState("");
   const [gname, setGname] = useState("");
   const [gmin, setGmin] = useState(0);
   const [gmax, setGmax] = useState(0);
   const [grequired, setGrequired] = useState(false);
 
-  // Opción (nueva)
   const [optId, setOptId] = useState("");
   const [optName, setOptName] = useState("");
   const [optPrice, setOptPrice] = useState<number>(0);
   const [optIng, setOptIng] = useState<string>("");
   const [optQty, setOptQty] = useState<number>(0);
 
-  // Opciones del grupo (editables)
   const [options, setOptions] = useState<ModifierOption[]>([]);
 
-  const normalizeId = (v: string) =>
-    v.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
+  const normalizeId = (value: string) =>
+    value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
 
   async function loadAll() {
-    const [g, ing] = await Promise.all([fetch("/api/modifier-groups", { cache: "no-store" }), fetch("/api/ingredients", { cache: "no-store" })]);
-    const gd = await g.json();
-    const id = await ing.json();
-    setGroups(gd.items ?? []);
-    setIngredients(id.items ?? []);
+    const [groupsData, ingredientsData] = await Promise.all([
+      safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" }),
+      safeFetchJSON<{ items?: Ingredient[] }>("/api/ingredients", { cache: "no-store" }),
+    ]);
+
+    setGroups(groupsData.items ?? []);
+    setIngredients(ingredientsData.items ?? []);
   }
 
   useEffect(() => {
-    loadAll();
+    loadAll().catch((error) => {
+      console.error("Error loading modifier groups:", error);
+      setGroups([]);
+      setIngredients([]);
+    });
   }, []);
 
   const selectedIngredientNew = useMemo(
-    () => ingredients.find((i) => i._id === optIng),
+    () => ingredients.find((ingredient) => ingredient._id === optIng),
     [ingredients, optIng]
   );
 
-  // --------- NUEVA OPCIÓN (add) ----------
   function addOption() {
     setMsg("");
     const oid = normalizeId(optId);
-    if (!oid) return setMsg("❌ ID de opción obligatorio (ej: oreo).");
-    if (!optName.trim()) return setMsg("❌ Nombre de opción obligatorio.");
-    if (options.some((o) => o.id === oid)) return setMsg("❌ Ese ID de opción ya existe en el grupo.");
+    if (!oid) return setMsg("❌ ID de opcion obligatorio (ej: oreo).");
+    if (!optName.trim()) return setMsg("❌ Nombre de opcion obligatorio.");
+    if (options.some((option) => option.id === oid)) {
+      return setMsg("❌ Ese ID de opcion ya existe en el grupo.");
+    }
 
-    const opt: ModifierOption = {
+    const option: ModifierOption = {
       id: oid,
       name: optName.trim(),
       price: Number(optPrice ?? 0),
@@ -86,7 +96,7 @@ export default function ModificadoresPage() {
       qty: optIng ? Number(optQty ?? 0) : undefined,
     };
 
-    setOptions((prev) => [...prev, opt]);
+    setOptions((prev) => [...prev, option]);
     setOptId("");
     setOptName("");
     setOptPrice(0);
@@ -95,19 +105,17 @@ export default function ModificadoresPage() {
   }
 
   function removeOption(id: string) {
-    setOptions((prev) => prev.filter((o) => o.id !== id));
+    setOptions((prev) => prev.filter((option) => option.id !== id));
   }
 
-  // --------- EDITAR CAMPOS DE OPCIÓN EXISTENTE ----------
   function updateOption(id: string, patch: Partial<ModifierOption>) {
     setOptions((prev) =>
-      prev.map((o) => {
-        if (o.id !== id) return o;
-        const next = { ...o, ...patch };
+      prev.map((option) => {
+        if (option.id !== id) return option;
+        const next = { ...option, ...patch };
 
-        // si quitan ingredientId, también quitar qty
         if (!next.ingredientId) {
-          delete (next as any).qty;
+          delete (next as ModifierOption).qty;
         } else {
           next.qty = Number(next.qty ?? 0);
         }
@@ -119,22 +127,19 @@ export default function ModificadoresPage() {
     );
   }
 
-  // --------- CARGAR GRUPO PARA EDITAR ----------
   function loadGroupIntoForm(groupId: string) {
-    const g = groups.find((x) => x._id === groupId);
-    if (!g) return;
+    const group = groups.find((item) => item._id === groupId);
+    if (!group) return;
 
     setMsg("");
-    setEditingId(g._id);
+    setEditingId(group._id);
+    setGid(group._id);
+    setGname(group.name);
+    setGmin(Number(group.min ?? 0));
+    setGmax(Number(group.max ?? 0));
+    setGrequired(Boolean(group.required));
+    setOptions(Array.isArray(group.options) ? group.options : []);
 
-    setGid(g._id);
-    setGname(g.name);
-    setGmin(Number(g.min ?? 0));
-    setGmax(Number(g.max ?? 0));
-    setGrequired(Boolean(g.required));
-    setOptions(Array.isArray(g.options) ? g.options : []);
-
-    // limpiar inputs de nueva opción
     setOptId("");
     setOptName("");
     setOptPrice(0);
@@ -146,14 +151,12 @@ export default function ModificadoresPage() {
     setEditingId("");
     setPickGroupId("");
     setMsg("");
-
     setGid("");
     setGname("");
     setGmin(0);
     setGmax(0);
     setGrequired(false);
     setOptions([]);
-
     setOptId("");
     setOptName("");
     setOptPrice(0);
@@ -161,24 +164,22 @@ export default function ModificadoresPage() {
     setOptQty(0);
   }
 
-  // --------- GUARDAR (crear o editar) ----------
   async function saveGroup() {
     setMsg("");
     const id = normalizeId(gid);
     if (!id) return setMsg("❌ ID de grupo obligatorio (ej: toppings).");
     if (!gname.trim()) return setMsg("❌ Nombre de grupo obligatorio.");
-    if (gmin < 0) return setMsg("❌ min inválido.");
-    if (gmax < 0) return setMsg("❌ max inválido.");
+    if (gmin < 0) return setMsg("❌ min invalido.");
+    if (gmax < 0) return setMsg("❌ max invalido.");
     if (gmax !== 0 && gmax < gmin) return setMsg("❌ max no puede ser menor que min.");
 
-    // si estás editando, no permitir cambiar el _id (por seguridad)
     if (editingId && id !== editingId) {
-      return setMsg("❌ No puedes cambiar el ID del grupo mientras editas. Cancela edición y crea otro.");
+      return setMsg("❌ No puedes cambiar el ID del grupo mientras editas. Cancela edicion y crea otro.");
     }
 
     setLoading(true);
     try {
-      const method = editingId ? "PATCH" : "POST"; // ✅ PATCH edita, POST crea (o upsert)
+      const method = editingId ? "PATCH" : "POST";
       const res = await fetch("/api/modifier-groups", {
         method,
         headers: { "Content-Type": "application/json" },
@@ -192,21 +193,27 @@ export default function ModificadoresPage() {
         }),
       });
 
-      const data = await res.json().catch(() => null);
+      const text = await res.text();
+      let data: { error?: string } | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/modifier-groups: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "save_failed");
 
       setMsg(editingId ? "✅ Grupo actualizado." : "✅ Grupo guardado.");
       await loadAll();
 
-      // si estabas editando, recargar el mismo grupo (para reflejar normalizaciones)
       if (editingId) {
         setTimeout(() => loadGroupIntoForm(id), 0);
       } else {
-        // modo crear: limpiar
         cancelEdit();
       }
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo guardar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo guardar"));
     } finally {
       setLoading(false);
     }
@@ -218,13 +225,21 @@ export default function ModificadoresPage() {
     setMsg("");
     try {
       const res = await fetch(`/api/modifier-groups?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-      const data = await res.json().catch(() => null);
+      const text = await res.text();
+      let data: { error?: string } | null = null;
+
+      try {
+        data = text ? (JSON.parse(text) as { error?: string }) : null;
+      } catch {
+        throw new Error(`Respuesta no valida en /api/modifier-groups: ${text.slice(0, 200)}`);
+      }
+
       if (!res.ok) throw new Error(data?.error ?? "delete_failed");
       setMsg("✅ Eliminado.");
       await loadAll();
       if (editingId === id) cancelEdit();
-    } catch (e: any) {
-      setMsg("❌ Error: " + (e?.message ?? "No se pudo eliminar"));
+    } catch (error: unknown) {
+      setMsg("❌ Error: " + (error instanceof Error ? error.message : "No se pudo eliminar"));
     } finally {
       setLoading(false);
     }
@@ -235,11 +250,10 @@ export default function ModificadoresPage() {
       <div>
         <h1 className="text-2xl font-semibold">Modificadores</h1>
         <p className="text-sm text-neutral-400">
-          Crea grupos (Tamaño, Toppings, Leche...) y sus opciones. Ahora puedes <span className="text-neutral-200">editar</span> sin borrar.
+          Crea grupos (Tamano, Toppings, Leche...) y sus opciones. Ahora puedes <span className="text-neutral-200">editar</span> sin borrar.
         </p>
       </div>
 
-      {/* ✅ Selector de grupo existente */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="font-medium">Editar grupo existente</div>
 
@@ -252,9 +266,9 @@ export default function ModificadoresPage() {
               className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2"
             >
               <option value="">—</option>
-              {groups.map((g) => (
-                <option key={g._id} value={g._id}>
-                  {g.name} ({g._id})
+              {groups.map((group) => (
+                <option key={group._id} value={group._id}>
+                  {group.name} ({group._id})
                 </option>
               ))}
             </select>
@@ -269,11 +283,8 @@ export default function ModificadoresPage() {
           </button>
 
           {editingId && (
-            <button
-              onClick={cancelEdit}
-              className="rounded-xl border border-neutral-700 px-4 py-2 text-sm"
-            >
-              Cancelar edición
+            <button onClick={cancelEdit} className="rounded-xl border border-neutral-700 px-4 py-2 text-sm">
+              Cancelar edicion
             </button>
           )}
         </div>
@@ -285,7 +296,6 @@ export default function ModificadoresPage() {
         )}
       </div>
 
-      {/* Crear / Editar grupo */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
         <div className="font-medium">{editingId ? "Editar grupo" : "Nuevo grupo"}</div>
 
@@ -296,11 +306,11 @@ export default function ModificadoresPage() {
               value={gid}
               onChange={(e) => setGid(e.target.value)}
               placeholder="toppings"
-              disabled={!!editingId} // ✅ bloquea el ID si editas
+              disabled={Boolean(editingId)}
               className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 disabled:opacity-50"
             />
             <div className="text-xs text-neutral-500 mt-1">
-              Normaliza: <span className="text-neutral-300">{normalizeId(gid || "…")}</span>
+              Normaliza: <span className="text-neutral-300">{normalizeId(gid || "...")}</span>
             </div>
           </div>
 
@@ -325,7 +335,7 @@ export default function ModificadoresPage() {
           </div>
 
           <div>
-            <label className="text-xs text-neutral-400">Max (0 = sin límite)</label>
+            <label className="text-xs text-neutral-400">Max (0 = sin limite)</label>
             <input
               type="number"
               value={gmax}
@@ -340,13 +350,12 @@ export default function ModificadoresPage() {
           Requerido
         </label>
 
-        {/* Nueva opción */}
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 space-y-2">
-          <div className="text-sm font-medium">Agregar opción</div>
+          <div className="text-sm font-medium">Agregar opcion</div>
 
           <div className="grid md:grid-cols-6 gap-2">
             <div className="md:col-span-2">
-              <label className="text-xs text-neutral-400">ID opción</label>
+              <label className="text-xs text-neutral-400">ID opcion</label>
               <input
                 value={optId}
                 onChange={(e) => setOptId(e.target.value)}
@@ -384,9 +393,9 @@ export default function ModificadoresPage() {
                 className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2"
               >
                 <option value="">—</option>
-                {ingredients.map((i) => (
-                  <option key={i._id} value={i._id}>
-                    {i.name} ({i.unit})
+                {ingredients.map((ingredient) => (
+                  <option key={ingredient._id} value={ingredient._id}>
+                    {ingredient.name} ({ingredient.unit})
                   </option>
                 ))}
               </select>
@@ -411,27 +420,26 @@ export default function ModificadoresPage() {
           </div>
 
           <button onClick={addOption} className="rounded-xl border border-neutral-700 px-3 py-2 text-sm">
-            + Agregar opción
+            + Agregar opcion
           </button>
         </div>
 
-        {/* ✅ Lista de opciones EDITABLE */}
         {options.length > 0 && (
           <div className="mt-2 space-y-2">
             <div className="text-sm text-neutral-300">Opciones del grupo (editable):</div>
 
             <div className="grid md:grid-cols-2 gap-2">
-              {options.map((o) => {
-                const ing = ingredients.find((i) => i._id === o.ingredientId);
+              {options.map((option) => {
+                const ingredient = ingredients.find((item) => item._id === option.ingredientId);
 
                 return (
-                  <div key={o.id} className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 space-y-2">
+                  <div key={option.id} className="rounded-xl border border-neutral-800 bg-neutral-900 p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium">
-                        {o.id} <span className="text-xs text-neutral-500">(ID fijo)</span>
+                        {option.id} <span className="text-xs text-neutral-500">(ID fijo)</span>
                       </div>
                       <button
-                        onClick={() => removeOption(o.id)}
+                        onClick={() => removeOption(option.id)}
                         className="text-sm text-red-300 hover:text-red-200"
                       >
                         Quitar
@@ -442,8 +450,8 @@ export default function ModificadoresPage() {
                       <div>
                         <label className="text-xs text-neutral-400">Nombre</label>
                         <input
-                          value={o.name}
-                          onChange={(e) => updateOption(o.id, { name: e.target.value })}
+                          value={option.name}
+                          onChange={(e) => updateOption(option.id, { name: e.target.value })}
                           className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
                         />
                       </div>
@@ -453,8 +461,8 @@ export default function ModificadoresPage() {
                         <input
                           type="number"
                           step="0.01"
-                          value={Number(o.price ?? 0)}
-                          onChange={(e) => updateOption(o.id, { price: Number(e.target.value) })}
+                          value={Number(option.price ?? 0)}
+                          onChange={(e) => updateOption(option.id, { price: Number(e.target.value) })}
                           className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
                         />
                       </div>
@@ -462,14 +470,16 @@ export default function ModificadoresPage() {
                       <div className="col-span-2">
                         <label className="text-xs text-neutral-400">Insumo (opcional)</label>
                         <select
-                          value={o.ingredientId ?? ""}
-                          onChange={(e) => updateOption(o.id, { ingredientId: e.target.value || undefined, qty: 0 })}
+                          value={option.ingredientId ?? ""}
+                          onChange={(e) =>
+                            updateOption(option.id, { ingredientId: e.target.value || undefined, qty: 0 })
+                          }
                           className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
                         >
                           <option value="">—</option>
-                          {ingredients.map((i) => (
-                            <option key={i._id} value={i._id}>
-                              {i.name} ({i.unit})
+                          {ingredients.map((ingredientItem) => (
+                            <option key={ingredientItem._id} value={ingredientItem._id}>
+                              {ingredientItem.name} ({ingredientItem.unit})
                             </option>
                           ))}
                         </select>
@@ -480,14 +490,14 @@ export default function ModificadoresPage() {
                             <input
                               type="number"
                               step="0.01"
-                              value={Number(o.qty ?? 0)}
-                              disabled={!o.ingredientId}
-                              onChange={(e) => updateOption(o.id, { qty: Number(e.target.value) })}
+                              value={Number(option.qty ?? 0)}
+                              disabled={!option.ingredientId}
+                              onChange={(e) => updateOption(option.id, { qty: Number(e.target.value) })}
                               className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm disabled:opacity-50"
                             />
                           </div>
                           <div className="text-xs text-neutral-500 mt-6">
-                            Unidad: <span className="text-neutral-200">{ing?.unit ?? "—"}</span>
+                            Unidad: <span className="text-neutral-200">{ingredient?.unit ?? "—"}</span>
                           </div>
                         </div>
                       </div>
@@ -512,37 +522,36 @@ export default function ModificadoresPage() {
         </div>
       </div>
 
-      {/* Lista grupos */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
         <div className="font-medium">Grupos existentes</div>
 
         {groups.length === 0 ? (
-          <div className="text-sm text-neutral-400 mt-2">Aún no hay grupos.</div>
+          <div className="text-sm text-neutral-400 mt-2">Aun no hay grupos.</div>
         ) : (
           <div className="mt-3 space-y-2">
-            {groups.map((g) => (
-              <div key={g._id} className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+            {groups.map((group) => (
+              <div key={group._id} className="rounded-xl border border-neutral-800 bg-neutral-900 p-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium">
-                      {g.name} <span className="text-xs text-neutral-500">({g._id})</span>
+                      {group.name} <span className="text-xs text-neutral-500">({group._id})</span>
                     </div>
                     <div className="text-xs text-neutral-400">
-                      min: {g.min} · max: {g.max === 0 ? "∞" : g.max} · requerido: {g.required ? "sí" : "no"} · opciones:{" "}
-                      {g.options?.length ?? 0}
+                      min: {group.min} · max: {group.max === 0 ? "∞" : group.max} · requerido: {group.required ? "si" : "no"} · opciones:{" "}
+                      {group.options?.length ?? 0}
                     </div>
                   </div>
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => loadGroupIntoForm(g._id)}
+                      onClick={() => loadGroupIntoForm(group._id)}
                       className="rounded-xl border border-neutral-700 px-3 py-2 text-sm"
                     >
                       Editar
                     </button>
 
                     <button
-                      onClick={() => deleteGroup(g._id)}
+                      onClick={() => deleteGroup(group._id)}
                       className="rounded-xl border border-red-700 text-red-300 px-3 py-2 text-sm"
                     >
                       Eliminar
@@ -550,15 +559,15 @@ export default function ModificadoresPage() {
                   </div>
                 </div>
 
-                {g.options?.length > 0 && (
+                {group.options?.length > 0 && (
                   <div className="mt-2 grid md:grid-cols-2 gap-2">
-                    {g.options.map((o) => (
-                      <div key={o.id} className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+                    {group.options.map((option) => (
+                      <div key={option.id} className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
                         <div className="text-sm font-medium">
-                          {o.name} <span className="text-xs text-neutral-500">({o.id})</span>
+                          {option.name} <span className="text-xs text-neutral-500">({option.id})</span>
                         </div>
                         <div className="text-xs text-neutral-400">
-                          +{o.price} {o.ingredientId ? `· Insumo: ${o.ingredientId} (${o.qty ?? 0})` : ""}
+                          +{option.price} {option.ingredientId ? `· Insumo: ${option.ingredientId} (${option.qty ?? 0})` : ""}
                         </div>
                       </div>
                     ))}
@@ -569,14 +578,6 @@ export default function ModificadoresPage() {
           </div>
         )}
       </div>
-       return (
-    <>
-      <MobileTopBar title="Cartera" backTo="/dashboard" /> 
-      {/* resto de la página */}
-    </>
-  );
-
     </div>
-    
   );
 }

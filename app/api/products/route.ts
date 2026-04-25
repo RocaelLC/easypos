@@ -2,29 +2,46 @@ import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
 
 export type ProductRecipeItemDoc = {
-  ingredientId: string; // insumo base a descontar
+  ingredientId: string;
   qty: number;
 };
 
+type ProductRecipeInput = {
+  ingredientId?: unknown;
+  qty?: unknown;
+};
+
 export type ProductDoc = {
-  _id: string; // ✅ string
+  _id: string;
   name: string;
   price: number;
   category: string;
   active: boolean;
   modifierGroupIds: string[];
-  recipe: ProductRecipeItemDoc[]; // para inventario (luego lo conectamos)
+  recipe: ProductRecipeItemDoc[];
 };
 
 export async function GET() {
-  const db = await getDB();
-  const items = await db
-    .collection<ProductDoc>("products")
-    .find({})
-    .sort({ name: 1 })
-    .toArray();
+  try {
+    const db = await getDB();
+    const items = await db
+      .collection<ProductDoc>("products")
+      .find({})
+      .sort({ name: 1 })
+      .toArray();
 
-  return NextResponse.json({ items });
+    return NextResponse.json({ ok: true, items });
+  } catch (error) {
+    console.error("GET /api/products error:", error);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "No se pudieron cargar los productos",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -47,16 +64,16 @@ export async function POST(req: Request) {
     const safeId = String(id).trim();
 
     const safeGroups: string[] = Array.isArray(modifierGroupIds)
-      ? modifierGroupIds.map((x: any) => String(x).trim()).filter(Boolean)
+      ? modifierGroupIds.map((value: unknown) => String(value).trim()).filter(Boolean)
       : [];
 
     const safeRecipe: ProductRecipeItemDoc[] = Array.isArray(recipe)
       ? recipe
-          .map((r: any) => ({
-            ingredientId: String(r.ingredientId ?? "").trim(),
-            qty: Number(r.qty ?? 0),
+          .map((item: ProductRecipeInput) => ({
+            ingredientId: String(item.ingredientId ?? "").trim(),
+            qty: Number(item.qty ?? 0),
           }))
-          .filter((r) => r.ingredientId && Number.isFinite(r.qty) && r.qty > 0)
+          .filter((item) => item.ingredientId && Number.isFinite(item.qty) && item.qty > 0)
       : [];
 
     const doc: ProductDoc = {
@@ -71,25 +88,44 @@ export async function POST(req: Request) {
 
     const db = await getDB();
     await db.collection<ProductDoc>("products").updateOne(
-      { _id: safeId }, // ✅ string
+      { _id: safeId },
       { $set: doc },
       { upsert: true }
     );
 
     return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    console.error("[products] POST error:", err);
-    return NextResponse.json({ error: err?.message ?? "internal_error" }, { status: 500 });
+  } catch (error) {
+    console.error("[products] POST error:", error);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "No se pudo guardar el producto",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }
 
 export async function DELETE(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const db = await getDB();
-  await db.collection<ProductDoc>("products").deleteOne({ _id: String(id).trim() });
+    const db = await getDB();
+    await db.collection<ProductDoc>("products").deleteOne({ _id: String(id).trim() });
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /api/products error:", error);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "No se pudo eliminar el producto",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
 }

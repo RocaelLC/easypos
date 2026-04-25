@@ -1,22 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { safeFetchJSON } from "@/lib/safeFetchJSON";
 
 type ModifierOption = {
   id: string;
   name: string;
   price: number;
-  imageUrl?: string; // ✅
+  imageUrl?: string;
   ingredientId?: string;
   qty?: number;
 };
-
 
 type ModifierGroup = {
   _id: string;
   name: string;
   min: number;
-  max: number; // 0 = sin límite
+  max: number;
   required: boolean;
   options: ModifierOption[];
 };
@@ -37,12 +37,12 @@ export type CartModifier = {
 };
 
 export type CartItem = {
-  id: string; // lineId
+  id: string;
   productId: string;
   name: string;
   qty: number;
   basePrice: number;
-  price: number; // base + extras por unidad
+  price: number;
   modifiers: CartModifier[];
 };
 
@@ -62,19 +62,16 @@ export default function ModifierModal({
   const [allGroups, setAllGroups] = useState<ModifierGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  // selections[groupId] = Set<optionId>
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/modifier-groups");
-        const data = await res.json();
+        const data = await safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" });
         setAllGroups(data.items ?? []);
-      } catch (e: any) {
-        setError(e?.message ?? "No se pudieron cargar modificadores");
+      } catch (fetchError: unknown) {
+        setError(fetchError instanceof Error ? fetchError.message : "No se pudieron cargar modificadores");
       } finally {
         setLoading(false);
       }
@@ -83,7 +80,7 @@ export default function ModifierModal({
 
   const groups = useMemo(() => {
     const ids = new Set(product.modifierGroupIds ?? []);
-    return allGroups.filter((g) => ids.has(g._id));
+    return allGroups.filter((group) => ids.has(group._id));
   }, [allGroups, product.modifierGroupIds]);
 
   function toggle(group: ModifierGroup, optionId: string) {
@@ -94,7 +91,6 @@ export default function ModifierModal({
       if (has) {
         current.delete(optionId);
       } else {
-        // si max es 1 o es selección única, reemplaza
         const max = group.max ?? 0;
         const isSingle = max === 1;
 
@@ -102,7 +98,6 @@ export default function ModifierModal({
           current.clear();
           current.add(optionId);
         } else {
-          // si hay límite y ya alcanzó, no dejar agregar
           if (max !== 0 && current.size >= max) return prev;
           current.add(optionId);
         }
@@ -113,52 +108,54 @@ export default function ModifierModal({
   }
 
   const pickedModifiers: CartModifier[] = useMemo(() => {
-    const out: CartModifier[] = [];
-    for (const g of groups) {
-      const set = selections[g._id] ?? new Set<string>();
-      for (const oid of set) {
-        const opt = g.options?.find((o) => o.id === oid);
-        if (!opt) continue;
-        out.push({
-          groupId: g._id,
-          groupName: g.name,
-          optionId: opt.id,
-          name: opt.name,
-          price: Number(opt.price ?? 0),
+    const result: CartModifier[] = [];
+    for (const group of groups) {
+      const set = selections[group._id] ?? new Set<string>();
+      for (const optionId of set) {
+        const option = group.options?.find((item) => item.id === optionId);
+        if (!option) continue;
+        result.push({
+          groupId: group._id,
+          groupName: group.name,
+          optionId: option.id,
+          name: option.name,
+          price: Number(option.price ?? 0),
         });
       }
     }
-    return out;
+    return result;
   }, [groups, selections]);
 
-  const extras = useMemo(() => pickedModifiers.reduce((acc, m) => acc + (m.price ?? 0), 0), [pickedModifiers]);
+  const extras = useMemo(
+    () => pickedModifiers.reduce((acc, modifier) => acc + (modifier.price ?? 0), 0),
+    [pickedModifiers]
+  );
   const unitPrice = product.price + extras;
 
   function validate() {
-    for (const g of groups) {
-      const count = (selections[g._id]?.size ?? 0);
-      const min = Number(g.min ?? 0);
-      const max = Number(g.max ?? 0);
+    for (const group of groups) {
+      const count = selections[group._id]?.size ?? 0;
+      const min = Number(group.min ?? 0);
+      const max = Number(group.max ?? 0);
 
-      // required o min > 0
-      if ((g.required || min > 0) && count < min) {
-        return `Selecciona al menos ${min} en "${g.name}".`;
+      if ((group.required || min > 0) && count < min) {
+        return `Selecciona al menos ${min} en "${group.name}".`;
       }
       if (max !== 0 && count > max) {
-        return `Máximo ${max} en "${g.name}".`;
+        return `Maximo ${max} en "${group.name}".`;
       }
     }
     return "";
   }
 
   function addToCart() {
-    const v = validate();
-    if (v) {
-      setError(v);
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    const item: CartItem = {
+    onAdd({
       id: crypto.randomUUID(),
       productId: product._id,
       name: product.name,
@@ -166,9 +163,8 @@ export default function ModifierModal({
       basePrice: product.price,
       price: unitPrice,
       modifiers: pickedModifiers,
-    };
+    });
 
-    onAdd(item);
     onClose();
   }
 
@@ -196,29 +192,29 @@ export default function ModifierModal({
                 Este producto no tiene modificadores. Puedes agregarlo directo.
               </div>
             ) : (
-              groups.map((g) => {
-                const selected = selections[g._id] ?? new Set<string>();
-                const max = Number(g.max ?? 0);
+              groups.map((group) => {
+                const selected = selections[group._id] ?? new Set<string>();
+                const max = Number(group.max ?? 0);
                 const isSingle = max === 1;
 
                 return (
-                  <div key={g._id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-3">
+                  <div key={group._id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-3">
                     <div className="flex items-center justify-between">
-                      <div className="font-medium">{g.name}</div>
+                      <div className="font-medium">{group.name}</div>
                       <div className="text-xs text-neutral-400">
-                        {g.required ? "Requerido" : "Opcional"} · min {g.min} · max {max === 0 ? "∞" : max}
+                        {group.required ? "Requerido" : "Opcional"} · min {group.min} · max {max === 0 ? "∞" : max}
                       </div>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {g.options?.map((o) => {
-                        const on = selected.has(o.id);
+                      {group.options?.map((option) => {
+                        const on = selected.has(option.id);
                         const disabled = !on && max !== 0 && !isSingle && selected.size >= max;
 
                         return (
                           <button
-                            key={o.id}
-                            onClick={() => toggle(g, o.id)}
+                            key={option.id}
+                            onClick={() => toggle(group, option.id)}
                             disabled={disabled}
                             className={[
                               "rounded-xl border px-3 py-2 text-left text-sm",
@@ -227,13 +223,13 @@ export default function ModifierModal({
                             ].join(" ")}
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <div className="font-medium">{o.name}</div>
+                              <div className="font-medium">{option.name}</div>
                               <div className="text-xs text-neutral-300">
-                                {o.price ? `+${money(o.price)}` : "+$0"}
+                                {option.price ? `+${money(option.price)}` : "+$0"}
                               </div>
                             </div>
                             <div className="text-xs text-neutral-500 mt-1">
-                              {o.ingredientId ? `Insumo: ${o.ingredientId} (${o.qty ?? 0})` : "—"}
+                              {option.ingredientId ? `Insumo: ${option.ingredientId} (${option.qty ?? 0})` : "—"}
                             </div>
                           </button>
                         );
@@ -252,10 +248,7 @@ export default function ModifierModal({
           <button onClick={onClose} className="flex-1 rounded-xl border border-neutral-700 py-2">
             Cancelar
           </button>
-          <button
-            onClick={addToCart}
-            className="flex-1 rounded-xl bg-green-500 text-black py-2 font-medium"
-          >
+          <button onClick={addToCart} className="flex-1 rounded-xl bg-green-500 text-black py-2 font-medium">
             Agregar · {money(unitPrice)}
           </button>
         </div>

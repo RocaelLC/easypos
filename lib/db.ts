@@ -1,14 +1,19 @@
 import { MongoClient } from "mongodb";
 import { applyMongoDnsFix } from "@/lib/mongoDnsFix";
+
 applyMongoDnsFix();
 
-const uri = process.env.MONGODB_URI!;
-if (!uri) throw new Error("Missing MONGODB_URI in .env.local");
+const uri = process.env.MONGODB_URI;
+if (!uri) {
+  throw new Error("Falta MONGODB_URI en variables de entorno");
+}
 
-let clientPromise: Promise<MongoClient>;
+const dbName = process.env.MONGODB_DB || getDatabaseNameFromUri(uri);
+if (!dbName) {
+  throw new Error("Falta MONGODB_DB en variables de entorno o en la URI de MongoDB");
+}
 
 declare global {
-  // eslint-disable-next-line no-var
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
@@ -17,9 +22,15 @@ if (!global._mongoClientPromise) {
   global._mongoClientPromise = client.connect();
 }
 
-clientPromise = global._mongoClientPromise;
+const clientPromise = global._mongoClientPromise;
 
 export async function getDB() {
   const client = await clientPromise;
-  return client.db(); // usa la DB de la URI (easypos)
+  return client.db(dbName);
+}
+
+function getDatabaseNameFromUri(connectionString: string) {
+  const match = connectionString.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^?]+)/i);
+  const rawName = match?.[1]?.trim();
+  return rawName ? decodeURIComponent(rawName) : "";
 }
