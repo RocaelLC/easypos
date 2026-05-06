@@ -40,8 +40,8 @@ export default function ProductosPage() {
       safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" }),
     ]);
 
-    setProducts(productsData.items ?? []);
-    setGroups(groupsData.items ?? []);
+    setProducts(productsData?.items ?? []);
+    setGroups(groupsData?.items ?? []);
   }
 
   useEffect(() => {

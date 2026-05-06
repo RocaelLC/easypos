@@ -38,7 +38,7 @@ export default function InsumosPage() {
 
   async function load() {
     const data = await safeFetchJSON<{ items?: Ingredient[] }>("/api/ingredients", { cache: "no-store" });
-    setItems(data.items ?? []);
+    setItems(data?.items ?? []);
   }
 
   useEffect(() => {

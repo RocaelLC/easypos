@@ -80,7 +80,7 @@ export default function CarteraPage() {
 
   async function loadSummary() {
     const data = await safeFetchJSON<Summary>("/api/wallet/summary", { cache: "no-store" });
-    setSummary(data);
+    setSummary(data ?? null);
   }
 
   async function loadMovements(reset = false) {

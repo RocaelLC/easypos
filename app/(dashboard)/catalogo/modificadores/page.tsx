@@ -62,8 +62,8 @@ export default function ModificadoresPage() {
       safeFetchJSON<{ items?: Ingredient[] }>("/api/ingredients", { cache: "no-store" }),
     ]);
 
-    setGroups(groupsData.items ?? []);
-    setIngredients(ingredientsData.items ?? []);
+    setGroups(groupsData?.items ?? []);
+    setIngredients(ingredientsData?.items ?? []);
   }
 
   useEffect(() => {

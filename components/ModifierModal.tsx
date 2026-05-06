@@ -69,7 +69,7 @@ export default function ModifierModal({
       try {
         setLoading(true);
         const data = await safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" });
-        setAllGroups(data.items ?? []);
+        setAllGroups(data?.items ?? []);
       } catch (fetchError: unknown) {
         setError(fetchError instanceof Error ? fetchError.message : "No se pudieron cargar modificadores");
       } finally {
