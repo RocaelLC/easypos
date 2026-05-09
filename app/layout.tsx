@@ -1,12 +1,17 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#22c55e",
+};
 
 export const metadata: Metadata = {
   title: "EasyPOS",
   description: "Punto de venta PWA para cafeterías y postres",
   applicationName: "EasyPOS",
   manifest: "/manifest.json",
-  themeColor: "#22c55e",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

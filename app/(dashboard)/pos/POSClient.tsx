@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import CheckoutModal from "@/components/CheckoutModal";
 import CustomizeProductModal from "@/components/CustomizeProductModal";
 import { safeFetchJSON } from "@/lib/safeFetchJSON";
+import { getAuthClient } from "@/lib/firebaseClient";
 import { useAuth } from "@/lib/useAuth";
 
 type Product = {
@@ -85,10 +86,20 @@ export default function POSClient() {
     if (!loading && !user) router.replace("/login");
   }, [loading, router, user]);
 
+  async function getAuthHeaders() {
+    const token = await getAuthClient().currentUser?.getIdToken();
+    if (!token) throw new Error("No authenticated user");
+    return { Authorization: `Bearer ${token}` };
+  }
+
   useEffect(() => {
     (async () => {
       try {
-        const data = await safeFetchJSON<{ items?: Product[] }>("/api/products", { cache: "no-store" });
+        const headers = await getAuthHeaders();
+        const data = await safeFetchJSON<{ items?: Product[] }>("/api/products", {
+          cache: "no-store",
+          headers,
+        });
         const items = Array.isArray(data?.items) ? data.items : [];
         const active = items.filter((product) => product?.active);
 

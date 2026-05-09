@@ -1,4 +1,11 @@
 import { queueSale, listQueuedSales, removeQueuedSale } from "./offlineQueue";
+import { getAuthClient } from "./firebaseClient";
+
+async function getAuthHeaders() {
+  const token = await getAuthClient().currentUser?.getIdToken();
+  if (!token) throw new Error("No authenticated user");
+  return { Authorization: `Bearer ${token}` };
+}
 
 export async function submitSale(payload: any) {
   const sale = {
@@ -14,9 +21,13 @@ export async function submitSale(payload: any) {
   }
 
   try {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch("/api/sales", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
       body: JSON.stringify({ ...payload, clientSaleId: sale.id }),
     });
     if (!res.ok) throw new Error("network");
@@ -33,9 +44,13 @@ export async function syncQueuedSales() {
   const queued = await listQueuedSales();
   for (const q of queued) {
     try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/sales", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify({ ...q.payload, clientSaleId: q.id }),
       });
       if (res.ok) await removeQueuedSale(q.id);

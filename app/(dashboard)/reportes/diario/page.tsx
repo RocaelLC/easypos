@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import MobileTopBar from "@/components/MobileTopBar";
 import { useEffect, useMemo, useState } from "react";
+import { getAuthClient } from "@/lib/firebaseClient";
 
 type Method = "cash" | "transfer" | "card";
 
@@ -13,6 +14,7 @@ type SaleDoc = {
   total?: number;
   paymentMethod?: Method;
   items?: Array<{ name?: string; qty?: number; price?: number }>;
+  cancelled?: boolean;
 };
 
 type Summary = {
@@ -114,15 +116,65 @@ export default function ReporteDiario() {
 
   const [openScope, setOpenScope] = useState<"day" | "month" | "year" | null>(null);
   const [openSale, setOpenSale] = useState<SaleDoc | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelMsg, setCancelMsg] = useState("");
+
+  async function getAuthHeaders() {
+    const token = await getAuthClient().currentUser?.getIdToken();
+    if (!token) throw new Error("No authenticated user");
+    return { Authorization: `Bearer ${token}` };
+  }
+
+  async function cancelSale(saleId: string) {
+    if (!confirm("¿Estás seguro de que quieres anular esta venta? Se revertirá inventario y cartera.")) {
+      return;
+    }
+
+    setCancellingId(saleId);
+    setCancelMsg("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/sales/cancel", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ saleId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error al anular");
+
+      setCancelMsg("✅ Venta anulada correctamente");
+      setOpenSale(null);
+      await loadAll(); // Recargar reportes
+    } catch (error: unknown) {
+      setCancelMsg("❌ " + (error instanceof Error ? error.message : "Error al anular"));
+    } finally {
+      setCancellingId(null);
+    }
+  }
 
   async function loadAll() {
+    const headers = await getAuthHeaders();
+
     // Día (compatible con tu endpoint existente)
-    const d = await fetch(`/api/reports/daily?date=${encodeURIComponent(dayDate)}`, { cache: "no-store" }).then((r) => r.json());
+    const d = await fetch(`/api/reports/daily?date=${encodeURIComponent(dayDate)}`, {
+      cache: "no-store",
+      headers,
+    }).then((r) => r.json());
     setDayData(d);
 
     // Mes / Año (nuevo endpoint summary)
-    const m = await fetch(`/api/reports/summary?scope=month&date=${encodeURIComponent(dayDate)}`, { cache: "no-store" }).then((r) => r.json());
-    const y = await fetch(`/api/reports/summary?scope=year&date=${encodeURIComponent(dayDate)}`, { cache: "no-store" }).then((r) => r.json());
+    const m = await fetch(`/api/reports/summary?scope=month&date=${encodeURIComponent(dayDate)}`, {
+      cache: "no-store",
+      headers,
+    }).then((r) => r.json());
+    const y = await fetch(`/api/reports/summary?scope=year&date=${encodeURIComponent(dayDate)}`, {
+      cache: "no-store",
+      headers,
+    }).then((r) => r.json());
     setMonthData(m);
     setYearData(y);
   }
@@ -343,6 +395,11 @@ export default function ReporteDiario() {
               <div className="text-xs text-neutral-500 mt-1">
                 ID: {String(openSale.clientSaleId ?? openSale._id ?? "—")}
               </div>
+              {openSale.cancelled && (
+                <div className="text-xs text-yellow-400 mt-2 border-t border-neutral-800 pt-2">
+                  ⚠️ Esta venta fue anulada
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
@@ -369,6 +426,33 @@ export default function ReporteDiario() {
                 </div>
               )}
             </div>
+
+            {!openSale.cancelled && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const saleId = String(openSale._id ?? openSale.clientSaleId);
+                    cancelSale(saleId);
+                  }}
+                  disabled={cancellingId === String(openSale._id ?? openSale.clientSaleId)}
+                  className="flex-1 rounded-xl border border-red-700 bg-red-500/10 text-red-400 px-3 py-2 text-sm hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {cancellingId === String(openSale._id ?? openSale.clientSaleId) ? "Anulando..." : "Anular venta"}
+                </button>
+              </div>
+            )}
+
+            {cancelMsg && (
+              <div
+                className={`text-sm px-3 py-2 rounded-xl ${
+                  cancelMsg.startsWith("✅")
+                    ? "bg-green-500/10 text-green-400"
+                    : "bg-red-500/10 text-red-400"
+                }`}
+              >
+                {cancelMsg}
+              </div>
+            )}
 
             <div className="text-xs text-neutral-500">
               Nota: si quieres mostrar modificadores en el detalle, hay que guardar en la venta las selections/modifiers

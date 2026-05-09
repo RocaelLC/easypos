@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
+import { getUserFromRequest, authErrorResponse } from "@/lib/serverAuth";
 
 type Method = "cash" | "transfer" | "card";
 
@@ -51,6 +52,7 @@ function normalizeDateParam(dateStr: string | null) {
 
 export async function GET(req: Request) {
   try {
+    const user = await getUserFromRequest(req);
     const { searchParams } = new URL(req.url);
     const scope = normalizeScope(searchParams.get("scope"));
     const date = normalizeDateParam(searchParams.get("date"));
@@ -73,7 +75,7 @@ export async function GET(req: Request) {
     const sales = db.collection("sales");
 
     const docs = await sales
-      .find({ createdAt: { $gte: from, $lte: to } })
+      .find({ createdByUid: user.uid, createdAt: { $gte: from, $lte: to }, cancelled: { $ne: true } })
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -111,7 +113,8 @@ export async function GET(req: Request) {
       sales: docs, // 🔥 lista completa para “ver lo vendido”
     });
   } catch (e: any) {
-    console.error("[reports/summary] error", e);
+    console.error("[reports/daily] error", e);
+    if (e?.message === "missing_auth_token") return authErrorResponse();
     return NextResponse.json({ error: e?.message ?? "internal_error" }, { status: 500 });
   }
 }

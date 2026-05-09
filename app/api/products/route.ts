@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
+import { getUserFromRequest, authErrorResponse } from "@/lib/serverAuth";
 
-export type ProductRecipeItemDoc = {
+type ProductRecipeItemDoc = {
   ingredientId: string;
   qty: number;
 };
@@ -11,8 +12,10 @@ type ProductRecipeInput = {
   qty?: unknown;
 };
 
-export type ProductDoc = {
+type ProductDoc = {
   _id: string;
+  productId: string;
+  ownerUid: string;
   name: string;
   price: number;
   category: string;
@@ -21,18 +24,31 @@ export type ProductDoc = {
   recipe: ProductRecipeItemDoc[];
 };
 
-export async function GET() {
+function buildInternalId(ownerUid: string, productId: string) {
+  return `${ownerUid}:${productId}`;
+}
+
+function mapProductForClient(product: ProductDoc) {
+  return {
+    ...product,
+    _id: product.productId,
+  };
+}
+
+export async function GET(req: Request) {
   try {
+    const user = await getUserFromRequest(req);
     const db = await getDB();
     const items = await db
       .collection<ProductDoc>("products")
-      .find({})
+      .find({ ownerUid: user.uid })
       .sort({ name: 1 })
       .toArray();
 
-    return NextResponse.json({ ok: true, items });
+    return NextResponse.json({ ok: true, items: items.map(mapProductForClient) });
   } catch (error) {
     console.error("GET /api/products error:", error);
+    if ((error as Error)?.message === "missing_auth_token") return authErrorResponse();
     return NextResponse.json(
       {
         ok: false,
@@ -46,6 +62,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const user = await getUserFromRequest(req);
     const body = await req.json();
     const {
       id,
@@ -77,7 +94,9 @@ export async function POST(req: Request) {
       : [];
 
     const doc: ProductDoc = {
-      _id: safeId,
+      _id: buildInternalId(user.uid, safeId),
+      productId: safeId,
+      ownerUid: user.uid,
       name: String(name).trim(),
       price: Number(price ?? 0),
       category: String(category ?? "general").trim() || "general",
@@ -88,7 +107,7 @@ export async function POST(req: Request) {
 
     const db = await getDB();
     await db.collection<ProductDoc>("products").updateOne(
-      { _id: safeId },
+      { _id: doc._id },
       { $set: doc },
       { upsert: true }
     );
@@ -96,6 +115,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[products] POST error:", error);
+    if ((error as Error)?.message === "missing_auth_token") return authErrorResponse();
     return NextResponse.json(
       {
         ok: false,
@@ -109,16 +129,18 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    const user = await getUserFromRequest(req);
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
     const db = await getDB();
-    await db.collection<ProductDoc>("products").deleteOne({ _id: String(id).trim() });
+    await db.collection<ProductDoc>("products").deleteOne({ _id: buildInternalId(user.uid, String(id).trim()) });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("DELETE /api/products error:", error);
+    if ((error as Error)?.message === "missing_auth_token") return authErrorResponse();
     return NextResponse.json(
       {
         ok: false,

@@ -3,6 +3,9 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import { safeFetchJSON } from "@/lib/safeFetchJSON";
+import { getAuthClient } from "@/lib/firebaseClient";
+
+import { useAuth } from "@/lib/useAuth";
 
 type ModifierGroup = { _id: string; name: string };
 type Product = {
@@ -34,9 +37,16 @@ export default function ProductosPage() {
   const normalizeId = (value: string) =>
     value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
 
+  async function getAuthHeaders() {
+    const token = await getAuthClient().currentUser?.getIdToken();
+    if (!token) throw new Error("No authenticated user");
+    return { Authorization: `Bearer ${token}` };
+  }
+
   async function loadAll() {
+    const headers = await getAuthHeaders();
     const [productsData, groupsData] = await Promise.all([
-      safeFetchJSON<{ items?: Product[] }>("/api/products", { cache: "no-store" }),
+      safeFetchJSON<{ items?: Product[] }>("/api/products", { cache: "no-store", headers }),
       safeFetchJSON<{ items?: ModifierGroup[] }>("/api/modifier-groups", { cache: "no-store" }),
     ]);
 
@@ -66,9 +76,13 @@ export default function ProductosPage() {
 
     setLoading(true);
     try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/products", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify({
           id,
           name: pname.trim(),
@@ -111,7 +125,11 @@ export default function ProductosPage() {
     setLoading(true);
     setMsg("");
     try {
-      const res = await fetch(`/api/products?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/products?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
       const text = await res.text();
       let data: ApiError | null = null;
 
